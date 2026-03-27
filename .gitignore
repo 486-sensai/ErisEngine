@@ -7,8 +7,6 @@
 /x64/Debug
 /packages
 /.vs
-/ErisEngine/assets
-/ErisEngine/shaders
 /ErisEngine/ErisEngine.vcxproj
 /ErisEngine/ErisEngine.vcxproj.filters
 /ErisEngine/ErisEngine.vcxproj.user
@@ -16,3 +14,7 @@
 /ErisEngine/packages.config
 /ErisEngine.sln
 /ErisEngine/out/build/x64-Debug
+/ErisEngine/assets/rungholt
+/ErisEngine/shaders
+/ErisEngine/assets/roadBike.mtl
+/ErisEngine/assets/roadBike.obj
