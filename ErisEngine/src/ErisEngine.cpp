@@ -1,0 +1,2151 @@
+#include "ErisEngine.h"
+
+glm::mat4 aiMatrix4x4ToGlm(const aiMatrix4x4& from) {
+	glm::mat4 to;
+	to[0][0] = from.a1; to[1][0] = from.a2; to[2][0] = from.a3; to[3][0] = from.a4;
+	to[0][1] = from.b1; to[1][1] = from.b2; to[2][1] = from.b3; to[3][1] = from.b4;
+	to[0][2] = from.c1; to[1][2] = from.c2; to[2][2] = from.c3; to[3][2] = from.c4;
+	to[0][3] = from.d1; to[1][3] = from.d2; to[2][3] = from.d3; to[3][3] = from.d4;
+	return to;
+}
+
+static PFN_vkVoidFunction Eris_ImGui_Loader(const char* function_name, void* user_data) {
+    return vkGetInstanceProcAddr(*(VkInstance*)user_data, function_name);
+}
+
+
+VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
+	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+	}
+	else {
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+}
+
+void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator) {
+	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		func(instance, debugMessenger, pAllocator);
+	}
+}
+
+
+int ErisEngine::Eris_init() 
+{
+	if (!glfwInit()) {
+		std::cerr << "Failed to initialize GLFW" << std::endl;
+		return 0;
+	}
+
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+	m_window = glfwCreateWindow(1280, 720, "Eris Engine", nullptr, nullptr);
+	glfwSetWindowUserPointer(m_window, this);				// 绑定当前对象指针
+	glfwSetFramebufferSizeCallback(m_window, framebufferResizeCallback);
+
+	if (!m_window) {
+		std::cerr << "Failed to create GLFW window" << std::endl;
+		return 0;
+	}
+
+	glfwMaximizeWindow(m_window);
+
+	initVulkan();
+	initVma();
+	initSwapchain();
+	createDepthBuffer();
+	initRenderPass();
+	initUIRenderPass();
+	createFramebuffers();
+	initSyncStructures();
+	initCommands();
+	initDescriptors();
+	initPipelines();
+
+	m_activeWorld = new ErisWorld();
+	m_activeWorld->getPhysics().createBox(
+		glm::vec3(0.0f, -2.0f, 0.0f),
+		glm::vec3(100.0f, 1.0f, 100.0f),
+		true
+	);
+
+	m_editor = new ErisEditor();
+	m_editor->init(this);
+	initViewportResources();
+	initDefaultResources();
+	if (loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
+		m_model.uploadModel(m_allocator, this);
+
+		// 生成两辆车，放在不同位置
+		RenderObject* car1 = m_activeWorld->spawnObject(&m_model, "Main_Car");
+		car1->m_location = glm::vec3(0.0f, 0.0f, 0.0f);
+
+		RenderObject* car2 = m_activeWorld->spawnObject(&m_model, "Backup_Car");
+		car2->m_location = glm::vec3(5.0f, 0.0f, -2.0f);
+		car2->m_scale = glm::vec3(0.5f);
+	}
+
+	m_camera.m_position = glm::vec3(0.0f, 1.0f, 3.0f);
+
+
+
+	m_isInitialized = true;
+	return 1;
+
+}
+
+// 检查扩展是否支持交换链
+bool ErisEngine:: checkDeviceExtensionSupport(VkPhysicalDevice device) {
+	uint32_t extensionCount;
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+	std::vector<VkExtensionProperties>availableExtensions(extensionCount);
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+	std::set<std::string>requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+	//debug test
+	std::cout << "ExtensionNames Listed Below:\n";
+	for (auto extensionName : requiredExtensions) {
+		std::cout << "\t" << extensionName << "\n";
+	}
+
+	for (const auto& extension : availableExtensions) {
+		requiredExtensions.erase(extension.extensionName);
+	}
+
+	return requiredExtensions.empty();
+}
+
+VkSurfaceFormatKHR ErisEngine::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+	// 判断首选组合是否可用
+	for (const auto& availableFormat : availableFormats) {
+		if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+			return availableFormat;
+		}
+	}
+
+	return availableFormats[0];
+}
+
+VkPresentModeKHR ErisEngine::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+	for (const auto& availablePresentMode : availablePresentModes) {
+		if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+			return availablePresentMode;
+		}
+	}
+
+	return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+VkExtent2D ErisEngine::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
+	if (capabilities.currentExtent.width != (std::numeric_limits<uint32_t>::max)()) {
+		return capabilities.currentExtent;
+	}
+	else {
+		int width, height;
+		glfwGetFramebufferSize(m_window, &width, &height);
+
+		VkExtent2D actualExtent = {
+			static_cast<uint32_t>(width),
+			static_cast<uint32_t>(height)
+		};
+
+		actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+		actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+		return actualExtent;
+	}
+}
+
+bool ErisEngine::loadShaderModule(const char* filePath, VkShaderModule* outShaderModule)
+{
+	std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) return false;
+
+	size_t fileSize = (size_t)file.tellg();
+	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+	file.seekg(0);
+	file.read((char*)buffer.data(), fileSize);
+	file.close();
+
+	VkShaderModuleCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	createInfo.codeSize = buffer.size() * sizeof(uint32_t);
+	createInfo.pCode = buffer.data();
+
+	return vkCreateShaderModule(m_device, &createInfo, nullptr, outShaderModule) == VK_SUCCESS;
+}
+
+void ErisEngine::createSwapchain()
+{
+	SwapChainSupportDetails swapchainSupport = querySwapChainSupport(m_physicalDevice);
+
+	VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapchainSupport.formats);
+	VkPresentModeKHR presentMode = chooseSwapPresentMode(swapchainSupport.presentModes);
+	VkExtent2D extent = chooseSwapExtent(swapchainSupport.capabilities);
+
+	uint32_t imageCount = swapchainSupport.capabilities.minImageCount + 1;
+	if (swapchainSupport.capabilities.maxImageCount > 0 && imageCount > swapchainSupport.capabilities.maxImageCount) {
+		imageCount = swapchainSupport.capabilities.maxImageCount;
+	}
+
+	VkSwapchainCreateInfoKHR createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	createInfo.surface = m_surface;
+	createInfo.minImageCount = imageCount;	// 几重缓冲
+	createInfo.imageFormat = surfaceFormat.format;
+	createInfo.imageColorSpace = surfaceFormat.colorSpace;
+	createInfo.imageExtent = extent;
+	createInfo.imageArrayLayers = 1;
+	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	// imageArrayLayers 指定每个图像包含的层数。 除非您正在开发立体 3D 应用程序，否则此值始终为 1
+
+	createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;		// 垂直同步
+	createInfo.clipped = VK_TRUE;
+
+	QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+	uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(),indices.presentFamily.value() };
+
+	if (indices.graphicsFamily != indices.presentFamily) {
+		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		createInfo.queueFamilyIndexCount = 2;
+		createInfo.pQueueFamilyIndices = queueFamilyIndices;
+	}
+	else {
+		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		createInfo.queueFamilyIndexCount = 0;       //optional
+		createInfo.pQueueFamilyIndices = nullptr;   //optional(可以不用写这两行)
+	}
+
+	createInfo.preTransform = swapchainSupport.capabilities.currentTransform;
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	createInfo.presentMode = presentMode;
+	createInfo.clipped = VK_TRUE;
+
+	createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+	if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapchain) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create swap chain!");
+	}
+
+	vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, nullptr);
+	m_swapchainImages.resize(imageCount);
+	vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, m_swapchainImages.data());
+
+	m_swapchainImageFormat = surfaceFormat.format;
+	m_swapchainExtent = extent;
+}
+
+void ErisEngine::recreateSwapchain()
+{
+	int width = 0, height = 0;
+	glfwGetFramebufferSize(m_window, &width, &height);
+
+	while (width == 0 || height == 0) { // 处理最小化
+		glfwGetFramebufferSize(m_window, &width, &height);
+		glfwWaitEvents();
+	}
+
+	vkDeviceWaitIdle(m_device);
+
+	cleanSwapchain();
+
+
+	// 2. 重新创建
+	createSwapchain();
+	createImageViews();
+	createDepthBuffer();    // 必须重新创建深度缓冲，因为它跟分辨率相关
+	createFramebuffers();   // 重新绑定
+
+	initViewportResources();
+	ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(m_swapchainImages.size()));
+}
+
+// 创建图像视图
+void ErisEngine::createImageViews() {
+	m_swapchainImageViews.resize(m_swapchainImages.size());
+
+	for (size_t i = 0; i < m_swapchainImages.size(); i++) {
+		m_swapchainImageViews[i] = createImageView(m_swapchainImages[i], m_swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+	}
+
+}
+
+void ErisEngine::createFramebuffers()
+{
+	m_frameBuffers.resize(m_swapchainImageViews.size());
+	for (size_t i = 0; i < m_swapchainImageViews.size(); i++) {
+		std::array<VkImageView, 2> attachments = {
+			//colorImageView,
+			m_swapchainImageViews[i],
+			m_depthImage.imageView
+		};
+
+		VkFramebufferCreateInfo framebufferInfo{};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferInfo.renderPass = m_renderPass;
+		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data();
+		framebufferInfo.width = m_swapchainExtent.width;
+		framebufferInfo.height = m_swapchainExtent.height;
+		framebufferInfo.layers = 1;
+
+		if (vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_frameBuffers[i]) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create framebuffer!");
+		}
+
+	}
+}
+
+VkImageView ErisEngine::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels)
+{
+	VkImageViewCreateInfo viewInfo{};
+	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	viewInfo.image = image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = format;
+	viewInfo.subresourceRange.aspectMask = aspectFlags;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = mipLevels;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+
+	VkImageView imageView;
+	if (vkCreateImageView(m_device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create image view!");
+	}
+
+	return imageView;
+}
+
+// 得到最多的多重采样
+VkSampleCountFlagBits ErisEngine::getMaxUsableSampleCount() {
+	VkPhysicalDeviceProperties physicalDeviceProperties;
+	vkGetPhysicalDeviceProperties(m_physicalDevice, &physicalDeviceProperties);
+
+	VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+	if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+	if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+	if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+	if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+	if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+	if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+	return VK_SAMPLE_COUNT_1_BIT;
+}
+
+void ErisEngine::initPipelines()
+{
+	VkShaderModule vertModule, fragModule;
+	if (!loadShaderModule("shaders/vert.spv", &vertModule) || !loadShaderModule("shaders/frag.spv", &fragModule)) {
+		throw std::runtime_error("failed to load shaders!");
+	}
+
+	// 管线布局（目前为空，以后放 MVP 矩阵）
+	VkPushConstantRange pushConstantRange;
+	pushConstantRange.offset = 0;
+	pushConstantRange.size = sizeof(MeshPushConstants);
+	pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkPipelineLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layoutInfo.setLayoutCount = 1;
+	layoutInfo.pSetLayouts = &m_singleTextureLayout;
+	layoutInfo.pushConstantRangeCount = 1;
+	layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+	if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+
+	PipelineBuilder builder;
+	// 1. 添加着色器阶段
+	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertModule, "main" });
+	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragModule, "main" });
+
+
+	// 2. 设置顶点输入（现在是空的）
+	builder.m_vertexBindings.push_back(Vertex::getBindingDescription());
+	builder.m_vertexAttributes = Vertex::getAttributeDescriptions();
+
+	builder.m_vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	builder.m_vertexInputInfo.pNext = nullptr;
+
+	// 3. 设置拓扑（三角形）
+	builder.m_inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	builder.m_inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	builder.m_inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	// 4. 设置视口
+	builder.m_dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	builder.m_viewport = { 0.0f,0.0f,(float)m_swapchainExtent.width,(float)m_swapchainExtent.height,0.0f,1.0f };
+	builder.m_scissor = { {0,0},m_swapchainExtent };
+
+	// 5. 光栅化
+	builder.m_rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	builder.m_rasterizer.pNext = nullptr;
+	builder.m_rasterizer.flags = 0;
+	builder.m_rasterizer.depthClampEnable = VK_FALSE;
+	builder.m_rasterizer.rasterizerDiscardEnable = VK_FALSE;
+	builder.m_rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	//builder.m_rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+	builder.m_rasterizer.cullMode = VK_CULL_MODE_NONE;
+	builder.m_rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;	// vulkan翻转Y轴了
+	builder.m_rasterizer.depthBiasEnable = VK_FALSE;
+	builder.m_rasterizer.depthBiasConstantFactor = 0.0f;
+	builder.m_rasterizer.depthBiasClamp = 0.0f;
+	builder.m_rasterizer.depthBiasSlopeFactor = 0.0f;
+	builder.m_rasterizer.lineWidth = 1.0f;
+
+	// 6. 混合模式（不透明）
+	builder.m_colorBlendAttachment.blendEnable = VK_FALSE;
+	builder.m_colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+	builder.m_colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+	builder.m_colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	builder.m_colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	builder.m_colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	builder.m_colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	builder.m_colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+	// --- 必须增加：深度测试配置 ---
+	builder.m_depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	builder.m_depthStencil.pNext = nullptr;
+	builder.m_depthStencil.depthTestEnable = VK_TRUE;           // 开启深度测试
+	builder.m_depthStencil.depthWriteEnable = VK_TRUE;          // 开启深度写入
+	builder.m_depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL; // 越近的物体越先画
+	builder.m_depthStencil.depthBoundsTestEnable = VK_FALSE;
+	builder.m_depthStencil.minDepthBounds = 0.0f;
+	builder.m_depthStencil.maxDepthBounds = 1.0f;
+	builder.m_depthStencil.stencilTestEnable = VK_FALSE;        // 暂时不启用模板测试
+
+	// 7. 多重采样
+	builder.m_multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	builder.m_multisampling.sampleShadingEnable = VK_FALSE;
+	builder.m_multisampling.rasterizationSamples = msaaSamples;
+
+	builder.m_pipelineLayout = m_pipelineLayout;
+	m_pipeline = builder.buildPipeline(m_device, m_renderPass);
+
+	vkDestroyShaderModule(m_device, vertModule, nullptr);
+	vkDestroyShaderModule(m_device, fragModule, nullptr);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+		vkDestroyPipeline(m_device, m_pipeline, nullptr);
+		});
+}
+
+
+FrameData& ErisEngine::getCurrentFrame()
+{
+	return m_frames[m_frameNumber % MAX_FRAMES_IN_FLIGHT];
+}
+
+
+void ErisEngine::Eris_run()
+{
+	while (!glfwWindowShouldClose(m_window))
+	{
+		glfwPollEvents();
+		drawFrame();
+	}
+}
+
+
+void ErisEngine::Eris_cleanup()
+{
+	if (m_isInitialized) {
+		vkDeviceWaitIdle(m_device);
+
+		if (m_editor) {
+			m_editor->cleanup(m_device);
+			vkDestroyDescriptorPool(m_device, m_imguiPool, nullptr);
+			delete m_editor;
+		}
+
+		cleanSwapchain();
+
+		m_mainDeletionQueue.flush();
+
+		if (m_debugMessenger != VK_NULL_HANDLE) {
+			DestroyDebugUtilsMessengerEXT(m_instance, m_debugMessenger, nullptr);
+		}
+		vkDestroyDevice(m_device, nullptr);
+		vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+		vkDestroyInstance(m_instance, nullptr);
+
+		glfwDestroyWindow(m_window);
+		glfwTerminate();
+	}
+}
+
+void ErisEngine:: cleanSwapchain()
+{
+	// 显式销毁帧缓冲
+	if (m_viewportFramebuffer != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(m_device, m_viewportFramebuffer, nullptr);
+		m_viewportFramebuffer = VK_NULL_HANDLE;
+	}
+	for (auto fb : m_frameBuffers) {
+		vkDestroyFramebuffer(m_device, fb, nullptr);
+	}
+	m_frameBuffers.clear();
+
+	// 销毁视口贴图资源
+	if (m_viewportImage.imageView != VK_NULL_HANDLE) {
+		vkDestroyImageView(m_device, m_viewportImage.imageView, nullptr);
+		m_viewportImage.imageView = VK_NULL_HANDLE;
+	}
+	if (m_viewportImage.image != VK_NULL_HANDLE) {
+		vmaDestroyImage(m_allocator, m_viewportImage.image, m_viewportImage.allocation);
+		m_viewportImage.image = VK_NULL_HANDLE;
+	}
+
+
+	// 显式销毁深度资源
+	if (m_depthImage.imageView != VK_NULL_HANDLE) {
+		vkDestroyImageView(m_device, m_depthImage.imageView, nullptr);
+		m_depthImage.imageView = VK_NULL_HANDLE;
+	}
+	if (m_depthImage.image != VK_NULL_HANDLE) {
+		vmaDestroyImage(m_allocator, m_depthImage.image, m_depthImage.allocation);
+		m_depthImage.image = VK_NULL_HANDLE;
+	}
+
+	// 销毁旧的图像视图
+	for (auto view : m_swapchainImageViews) {
+		vkDestroyImageView(m_device, view, nullptr);
+	}
+	m_swapchainImageViews.clear();
+
+	if (m_swapchain != VK_NULL_HANDLE) {
+		vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
+		m_swapchain = VK_NULL_HANDLE;
+	}
+}
+
+void ErisEngine::initVulkan()
+{
+	// 
+    // 1. 创建 Instance
+	createInstance();
+
+	// 2. 创建 Surface
+	createSurface();
+
+	// 3. 挑选物理设备 (GPU)
+	pickPhysicalDevice();
+
+	// 4. 创建逻辑设备和获取队列
+	// 查找图形队列族
+	createLogicalDevice();
+
+
+}
+
+
+void ErisEngine::initVma()
+{
+	// 1. 显式加载 Vulkan 函数指针
+	VmaVulkanFunctions vulkanFunctions = {};
+	vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+	vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+	// 如果你使用的是 Vulkan 1.1+，建议补全这些（可选但推荐）
+	vulkanFunctions.vkGetPhysicalDeviceMemoryProperties = &vkGetPhysicalDeviceMemoryProperties;
+	vulkanFunctions.vkGetDeviceBufferMemoryRequirements = &vkGetDeviceBufferMemoryRequirements;
+	vulkanFunctions.vkGetDeviceImageMemoryRequirements = &vkGetDeviceImageMemoryRequirements;
+
+	VmaAllocatorCreateInfo allocatorInfo{};
+	allocatorInfo.physicalDevice = m_physicalDevice;
+	allocatorInfo.device = m_device;
+	allocatorInfo.instance = m_instance;
+	allocatorInfo.pVulkanFunctions = &vulkanFunctions; // 核心：传入函数指针表
+
+	// 对应你 Instance 里的 apiVersion
+	allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_0;
+
+	if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create VMA Allocator!");
+	}
+
+	m_mainDeletionQueue.push_function([=]() {
+		vmaDestroyAllocator(m_allocator);
+		});
+}
+
+void ErisEngine::initSwapchain()
+{
+	// 此处应包含创建 VkSwapchainKHR 的代码
+	// 赋值给 m_swapchain, m_swapchainImageFormat, m_swapchainImages, m_swapchainImageViews
+
+	createSwapchain();
+	createImageViews();
+}
+
+void ErisEngine::initCommands()
+{
+	// 此处应包含创建 VkCommandPool 的逻辑
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		// 创建每帧的命令池
+		VkCommandPoolCreateInfo commandPoolInfo{};
+		commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		commandPoolInfo.queueFamilyIndex = m_graphicsQueueFamily;
+		commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+		if (vkCreateCommandPool(m_device, &commandPoolInfo, nullptr, &m_frames[i].m_commandPool) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create per-frame command pool!");
+		}
+
+		// 分配每帧的主命令缓冲
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool = m_frames[i].m_commandPool;
+		allocInfo.commandBufferCount = 1;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+		vkAllocateCommandBuffers(m_device, &allocInfo, &m_frames[i].m_mainCommandBuffer);
+
+		// 注册销毁
+		m_mainDeletionQueue.push_function([=]() {
+			vkDestroyCommandPool(m_device, m_frames[i].m_commandPool, nullptr);
+			});
+	}
+
+}
+
+
+
+void ErisEngine::initSyncStructures()
+{
+	// 此处应包含创建 VkFence 和 VkSemaphore 的逻辑
+
+	VkFenceCreateInfo fenceInfo{};
+	fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	// 初始状态设为 Signaled，确保第一帧不会无限等待
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	VkSemaphoreCreateInfo semaphoreInfo{};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		if (vkCreateFence(m_device, &fenceInfo, nullptr, &m_frames[i].m_renderFence) != VK_SUCCESS ||
+			vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_frames[i].m_presentSemaphore) != VK_SUCCESS ||
+			vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_frames[i].m_renderSemaphore) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create synchronization structures for a frame!");
+		}
+
+		m_mainDeletionQueue.push_function([=]() {
+			vkDestroyFence(m_device, m_frames[i].m_renderFence, nullptr);
+			vkDestroySemaphore(m_device, m_frames[i].m_presentSemaphore, nullptr);
+			vkDestroySemaphore(m_device, m_frames[i].m_renderSemaphore, nullptr);
+			});
+	}
+
+}
+
+void ErisEngine::initRenderPass()
+{
+	// 1. 颜色附件描述
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = m_swapchainImageFormat;
+	colorAttachment.samples = msaaSamples;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;  // 每一帧开始时：清除
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // 每一帧结束时：保存渲染结果
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 保持在渲染目标状态
+
+	// 2. 深度附件 (新增)
+	VkAttachmentDescription depthAttachment{};
+	depthAttachment.format = m_depthFormat;
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+
+	// 2. 附件引用
+	VkAttachmentReference colorAttachmentRef{};
+	colorAttachmentRef.attachment = 0; // 对应 pAttachments 数组中的索引
+	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthAttachmentRef{};
+	depthAttachmentRef.attachment = 1; // 索引为 1
+	depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	// 3. 子通道 (Subpass)
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef;
+	subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+	// 4. 子通道依赖 (防止在图像还没准备好时就开始清除操作)
+	VkSubpassDependency dependency{};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+
+
+	// 5. 创建 Render Pass
+	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+	VkRenderPassCreateInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+	renderPassInfo.pAttachments = attachments.data();
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = &subpass;
+	renderPassInfo.dependencyCount = 1;
+	renderPassInfo.pDependencies = &dependency;
+
+	if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create render pass!");
+	}
+
+	// 注册销毁
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+		});
+}
+
+
+void ErisEngine::initUIRenderPass() {
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = m_swapchainImageFormat;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // UI 层也清除一次
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 最终给显示器
+
+	// 2. 深度附件 (Attachment 1) - 即使 UI 不用，也必须声明以保持兼容
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = m_depthFormat; // 确保使用和你主 Pass 一样的深度格式
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;  // UI 不关心深度内容
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+
+	VkAttachmentReference colorRef = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+	VkAttachmentReference depthRef = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorRef;
+	subpass.pDepthStencilAttachment = &depthRef;
+
+
+	VkSubpassDependency dependency{};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	
+	
+	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+	VkRenderPassCreateInfo createInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	createInfo.attachmentCount = 2;
+	createInfo.pAttachments = attachments.data();
+	createInfo.subpassCount = 1;
+	createInfo.pSubpasses = &subpass;
+	createInfo.dependencyCount = 1;
+	createInfo.pDependencies = &dependency;
+
+	if (vkCreateRenderPass(m_device, &createInfo, nullptr, &m_uiRenderPass) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create UI render pass!");
+	}
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyRenderPass(m_device, m_uiRenderPass, nullptr);
+		});
+}
+
+bool ErisEngine:: checkValidationLayerSupport() 
+{
+	uint32_t layerCount;
+	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+
+	std::vector<VkLayerProperties> availableLayers(layerCount);
+	vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+	for (const char* layerName : validationLayers) {
+		bool layerFound = false;
+
+		for (const auto& layerProperties : availableLayers) {
+			if (strcmp(layerName, layerProperties.layerName) == 0) {
+				layerFound = true;
+				break;
+			}
+		}
+
+		if (!layerFound) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+SwapChainSupportDetails ErisEngine::querySwapChainSupport(VkPhysicalDevice device) {
+	SwapChainSupportDetails details;
+
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
+
+	uint32_t formatCount;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, nullptr);
+
+	if (formatCount != 0) {
+		details.formats.resize(formatCount);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, details.formats.data());
+	}
+
+	uint32_t presentModeCount;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, nullptr);
+
+	if (presentModeCount != 0) {
+		details.presentModes.resize(presentModeCount);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, details.presentModes.data());
+	}
+
+	return details;
+}
+
+
+
+void ErisEngine::createDepthBuffer()
+{ 
+	// 1. 确定格式和尺寸
+	m_depthFormat = findDepthFormat();
+
+	VkExtent3D depthImageExtent = {
+		m_swapchainExtent.width,
+		m_swapchainExtent.height,
+		1
+	};
+
+	// 2. 配置图像信息 (VkImageCreateInfo)
+	VkImageCreateInfo depthImageInfo{};
+	depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
+	depthImageInfo.format = m_depthFormat;
+	depthImageInfo.extent = depthImageExtent;
+	depthImageInfo.mipLevels = 1;
+	depthImageInfo.arrayLayers = 1;
+	depthImageInfo.samples = msaaSamples;
+	depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; // 关键：指定为深度附件
+
+	// 3. 配置 VMA 内存分配信息 (VmaAllocationCreateInfo)
+	// 这取代了教程中的 VkMemoryAllocateInfo
+	VmaAllocationCreateInfo depthAllocInfo{};	
+	depthAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;	// 告诉 VMA 这块内存在显存中
+	depthAllocInfo.requiredFlags = (VkMemoryPropertyFlags)VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+	// 4. 使用 VMA 一次性创建 Image 和 Allocation
+   // 这取代了教程中的 vkCreateImage 和 vkAllocateMemory
+	VkResult res = vmaCreateImage(m_allocator, &depthImageInfo, &depthAllocInfo,
+		&m_depthImage.image,
+		&m_depthImage.allocation,
+		nullptr);
+
+	if (res != VK_SUCCESS) {
+		throw std::runtime_error("failed to create depth image! Result: " + std::to_string(res));
+	}
+
+	// 5. 配置并创建图像视图 (VkImageViewCreateInfo)
+	VkImageViewCreateInfo depthImageViewInfo{};
+	depthImageViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	depthImageViewInfo.pNext = nullptr;
+	depthImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	depthImageViewInfo.image = m_depthImage.image;
+	depthImageViewInfo.format = m_depthFormat;
+	depthImageViewInfo.subresourceRange.baseMipLevel = 0;
+	depthImageViewInfo.subresourceRange.levelCount = 1;
+	depthImageViewInfo.subresourceRange.baseArrayLayer = 0;
+	depthImageViewInfo.subresourceRange.layerCount = 1;
+	depthImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT; // 关键：标记为深度视角
+
+	if (vkCreateImageView(m_device, &depthImageViewInfo, nullptr, &m_depthImage.imageView) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create depth image view!");
+	}
+
+}
+
+VkFormat ErisEngine::findDepthFormat() {
+	return findSupportedFormat(
+		{ VK_FORMAT_D32_SFLOAT,VK_FORMAT_D32_SFLOAT_S8_UINT,VK_FORMAT_D24_UNORM_S8_UINT },
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+	);
+}
+
+VkFormat ErisEngine::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+	for (VkFormat format : candidates) {
+		VkFormatProperties props;
+		vkGetPhysicalDeviceFormatProperties(m_physicalDevice, format, &props);
+		if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+			return format;
+		}
+		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+			return format;
+		}
+	}
+
+	throw std::runtime_error("failed to find supported format!");
+}
+
+bool ErisEngine::isDeviceSuitable(VkPhysicalDevice device) {
+	QueueFamilyIndices indices = findQueueFamilies(device);
+
+	bool extensionsSupported = checkDeviceExtensionSupport(device);
+
+	bool swapChainAdequate = false;
+	if (extensionsSupported) {
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+		swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+	}
+
+	VkPhysicalDeviceFeatures supportedFeatures;
+	vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+
+	return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+}
+
+// 初始化验证层信息
+void ErisEngine::populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
+	createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	createInfo.pfnUserCallback = debugCallback;
+}
+
+
+void ErisEngine::setupDebugMessenger()
+{
+	if (!enableValidationLayers)return;
+
+	VkDebugUtilsMessengerCreateInfoEXT createInfo;
+	populateDebugMessengerCreateInfo(createInfo);
+
+	if (CreateDebugUtilsMessengerEXT(m_instance, &createInfo, nullptr, &m_debugMessenger) != VK_SUCCESS) {
+		throw std::runtime_error("failed to set up debug messenger!\n");
+	}
+
+}
+
+void ErisEngine::createSurface()
+{
+	if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &m_surface) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create window surface!");
+	}
+}
+
+void ErisEngine::createLogicalDevice()
+{
+	QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	std::set<uint32_t>uniqueQueueFamilies = {
+		indices.graphicsFamily.value(),
+		indices.presentFamily.value() };
+
+	float queuePriority = 1.0f;
+	for (uint32_t queueFamily : uniqueQueueFamilies) {
+		VkDeviceQueueCreateInfo queueCreateInfo{};
+		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queueCreateInfo.queueFamilyIndex = queueFamily;
+		queueCreateInfo.queueCount = 1;
+		queueCreateInfo.pQueuePriorities = &queuePriority;
+		queueCreateInfos.push_back(queueCreateInfo);
+	}
+
+	VkPhysicalDeviceFeatures deviceFeatures{};
+	deviceFeatures.samplerAnisotropy = VK_TRUE;
+
+	VkDeviceCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+	createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+	createInfo.pQueueCreateInfos = queueCreateInfos.data();
+
+	createInfo.pEnabledFeatures = &deviceFeatures;
+
+	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+
+	if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create logical device!");
+	}
+
+	vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
+	vkGetDeviceQueue(m_device, indices.presentFamily.value(), 0, &m_presentQueue);
+}
+
+// 查找支持图形命令的队列
+QueueFamilyIndices ErisEngine::findQueueFamilies(VkPhysicalDevice device) {
+	QueueFamilyIndices indices;
+
+	// Logic to find queue family indices to populate struct with
+
+	uint32_t queueFamilyCount = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+	std::vector<VkQueueFamilyProperties>queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+	int i = 0;
+	for (const auto& queueFamily : queueFamilies) {
+		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			indices.graphicsFamily = i;
+		}
+		VkBool32 presentSupport = false;
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
+
+		if (presentSupport) {
+			indices.presentFamily = i;
+		}
+
+		if (indices.isComplete()) {
+			break;
+		}
+
+		i++;
+	}
+
+	return indices;
+}
+
+std::vector<const char*> ErisEngine::getRequiredExtensions() {
+	uint32_t glfwExtensionCount = 0;
+	const char** glfwExtensions;
+	glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+	std::vector<const char*>extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+	if (enableValidationLayers) {
+		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	}
+	return extensions;
+}
+
+void ErisEngine::pickPhysicalDevice()
+{
+	uint32_t deviceCount = 0;
+	vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
+	if (deviceCount == 0) {
+		throw std::runtime_error("failed to find GPUs with Vulkan support!");
+	}
+
+	std::vector<VkPhysicalDevice>devices(deviceCount);
+	vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
+
+	for (const auto& device : devices) {
+		if (isDeviceSuitable(device)) {
+			m_physicalDevice = device;
+			// msaaSamples = getMaxUsableSampleCount();
+			msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+			break;
+		}
+	}
+
+	if (m_physicalDevice == VK_NULL_HANDLE) {
+		throw std::runtime_error("failed to find a suitable GPU!");
+	}
+}
+
+void ErisEngine::createInstance()
+{
+	if (enableValidationLayers && !checkValidationLayerSupport()) {
+		throw std::runtime_error("validation layers requested, but not available!\n");
+	}
+	VkApplicationInfo appInfo{};
+	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+	appInfo.pApplicationName = "Eris Engine";
+	appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+	appInfo.pEngineName = "Eris";
+	appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+	appInfo.apiVersion = VK_API_VERSION_1_0;
+
+
+	VkInstanceCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	createInfo.pApplicationInfo = &appInfo;
+
+	auto extensions = getRequiredExtensions();
+	createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+	createInfo.ppEnabledExtensionNames = extensions.data();
+
+	// 调试信使
+	VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
+	if (enableValidationLayers) {
+		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		createInfo.ppEnabledLayerNames = validationLayers.data();
+
+		populateDebugMessengerCreateInfo(debugCreateInfo);
+		createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
+	}
+	else {
+		createInfo.enabledExtensionCount = 0;
+
+		createInfo.pNext = nullptr;
+	}
+
+
+	if (vkCreateInstance(&createInfo, nullptr, &m_instance) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create instance!");
+	}
+	else {
+		std::cout << "created instance successfully!" << std::endl;
+	}
+}
+
+//VkCommandBuffer ErisEngine::beginSingleTimeCommands(std::function<void(VkCommandBuffer cmd)>&& function) {
+//	VkCommandBufferAllocateInfo allocInfo{};
+//	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+//	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+//	allocInfo.commandPool = &m_frames[0].m_commandPool;
+//	allocInfo.commandBufferCount = 1;
+//
+//	VkCommandBuffer commandBuffer;
+//	vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+//
+//	VkCommandBufferBeginInfo beginInfo{};
+//	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;;
+//	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+//
+//	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+//
+//	function(commandBuffer);
+//
+//	return commandBuffer;
+//}
+//void ErisEngine::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+//	vkEndCommandBuffer(commandBuffer);
+//
+//	VkSubmitInfo submitInfo{};
+//	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+//	submitInfo.commandBufferCount = 1;
+//	submitInfo.pCommandBuffers = &commandBuffer;
+//
+//	vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+//	vkQueueWaitIdle(m_graphicsQueue);
+//
+//	vkFreeCommandBuffers(m_device, m_frames[0].m_commandPool, 1, &commandBuffer);
+//}
+
+
+AllocatedBuffer ErisEngine::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) 
+{
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.pNext = nullptr;
+	bufferInfo.size = allocSize;
+	bufferInfo.usage = usage;
+
+	VmaAllocationCreateInfo vmaAllocInfo{};
+	vmaAllocInfo.usage = memoryUsage;
+
+	AllocatedBuffer buffer;
+
+	if (vmaCreateBuffer(m_allocator, &bufferInfo, &vmaAllocInfo,
+		&buffer.buffer,
+		&buffer.allocation,
+		nullptr) != VK_SUCCESS)
+	{
+		throw std::runtime_error("Failed to create Vulkan Buffer via VMA!");
+	}
+
+	m_mainDeletionQueue.push_function([=]() {
+		vmaDestroyBuffer(m_allocator, buffer.buffer, buffer.allocation);
+		});
+
+	return buffer;
+
+}
+
+void ErisEngine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) 
+{
+	// 1. 分配临时的命令缓冲
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = m_frames[0].m_commandPool; // 借用第0帧的池
+	allocInfo.commandBufferCount = 1;
+
+	VkCommandBuffer cmd;
+	vkAllocateCommandBuffers(m_device, &allocInfo, &cmd);
+
+	// 2. 开始录制
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	vkBeginCommandBuffer(cmd, &beginInfo);
+
+	// 3. 执行外部传入的 Lambda 逻辑（比如拷贝缓冲）
+	function(cmd);
+
+	// 4. 结束并提交
+	vkEndCommandBuffer(cmd);
+
+	VkSubmitInfo submit{};
+	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &cmd;
+
+	vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+	vkQueueWaitIdle(m_graphicsQueue); // 等待拷贝完成
+
+	// 5. 释放临时缓冲
+	vkFreeCommandBuffers(m_device, m_frames[0].m_commandPool, 1, &cmd);
+}
+
+void ErisEngine::initDescriptors() {
+	// 1. 创建 Layout (插座规格)
+	VkDescriptorSetLayoutBinding textureBind{};
+	textureBind.binding = 0;
+	textureBind.descriptorCount = 1;
+	textureBind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textureBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings = &textureBind;
+
+	// 关键：确保赋值给 m_singleTextureLayout
+	if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_singleTextureLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	// 2. 创建 Pool (配电箱)
+	// 假设我们要支持 100 个材质贴图
+	std::vector<VkDescriptorPoolSize> sizes = {
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 }
+	};
+	VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	poolInfo.maxSets = 100;
+	poolInfo.poolSizeCount = (uint32_t)sizes.size();
+	poolInfo.pPoolSizes = sizes.data();
+
+	// 关键：确保赋值给 m_descriptorPool
+	if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor pool!");
+	}
+
+	// 3. 创建采样器 (Sampler)
+	VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	samplerInfo.magFilter = VK_FILTER_LINEAR;
+	samplerInfo.minFilter = VK_FILTER_LINEAR;
+	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler);
+
+	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroySampler(m_device, m_sampler, nullptr);
+		vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_singleTextureLayout, nullptr);
+		});
+}
+
+VkDescriptorSet ErisEngine::createDescriptorSet(AllocatedImage& img) {
+	if (m_descriptorPool == VK_NULL_HANDLE || m_singleTextureLayout == VK_NULL_HANDLE) {
+		std::cerr << "Descriptor resources not initialized!" << std::endl;
+		return VK_NULL_HANDLE;
+	}
+
+	VkDescriptorSet set;
+	VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &m_singleTextureLayout;
+
+	if (vkAllocateDescriptorSets(m_device, &allocInfo, &set) != VK_SUCCESS) {
+		return VK_NULL_HANDLE;
+	}
+
+	VkDescriptorImageInfo imageBufferInfo{};
+	imageBufferInfo.sampler = m_sampler; // 确保你已经在 initDescriptors 里创建了它
+	imageBufferInfo.imageView = img.imageView;
+	imageBufferInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	VkWriteDescriptorSet textureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	textureWrite.dstSet = set;
+	textureWrite.dstBinding = 0;
+	textureWrite.descriptorCount = 1;
+	textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textureWrite.pImageInfo = &imageBufferInfo;
+
+	vkUpdateDescriptorSets(m_device, 1, &textureWrite, 0, nullptr);
+	return set;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL ErisEngine::debugCallback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+	VkDebugUtilsMessageTypeFlagsEXT messageType,
+	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+	void* pUserData
+) {
+	std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+	return VK_FALSE;
+}
+
+void ErisEngine::drawFrame()
+{
+	
+	static auto lastTime = std::chrono::high_resolution_clock::now();
+	auto currentTime= std::chrono::high_resolution_clock::now();
+	float deltaTime= std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+	lastTime = currentTime;
+
+	if (m_activeWorld) {
+		m_activeWorld->update(deltaTime);
+	}
+
+	handleInput(deltaTime);
+
+
+	FrameData& frame = getCurrentFrame();
+	vkWaitForFences(m_device, 1, &frame.m_renderFence, VK_TRUE, UINT64_MAX);
+	// vkResetFences(m_device, 1, &frame.m_renderFence);
+
+	VkCommandBuffer cmd = frame.m_mainCommandBuffer;
+
+	uint32_t imageIndex;
+	VkResult result = vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, frame.m_presentSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+	// 如果交换链失效（如窗口调整大小），后续需要处理，现在暂不实现重构逻辑
+	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+		recreateSwapchain();
+		return;
+	}
+
+	vkResetFences(m_device, 1, &frame.m_renderFence);
+	vkResetCommandPool(m_device, frame.m_commandPool, 0);
+
+	m_editor->render_editor(this);
+
+	// 录制简单的渲染指令
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	if (vkBeginCommandBuffer(frame.m_mainCommandBuffer, &beginInfo) != VK_SUCCESS) {
+		throw std::runtime_error("failed to begin recording command buffer!");
+	}
+
+	std::array<VkClearValue, 2> clearValues{};
+	clearValues[0].color = { {0.03f, 0.03f, 0.03f, 1.0f} }; // 颜色清除
+	clearValues[1].depthStencil = { 1.0f, 0 };              // 深度清除
+
+
+	transitionImageLayout(frame.m_mainCommandBuffer, m_viewportImage.image, m_swapchainImageFormat,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	VkRenderPassBeginInfo sceneRpInfo{};
+	sceneRpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	sceneRpInfo.renderPass = m_renderPass;
+	sceneRpInfo.renderArea.offset = { 0, 0 };		//-------------
+	sceneRpInfo.renderArea.extent = m_swapchainExtent;
+	sceneRpInfo.framebuffer = m_viewportFramebuffer;
+	sceneRpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+	sceneRpInfo.pClearValues = clearValues.data();
+
+	vkCmdBeginRenderPass(frame.m_mainCommandBuffer, &sceneRpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		vkCmdBindPipeline(frame.m_mainCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+
+		m_viewport.width = (float)m_swapchainExtent.width;
+		m_viewport.height = (float)m_swapchainExtent.height;
+		m_viewport.minDepth = 0.0f;
+		m_viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(frame.m_mainCommandBuffer, 0, 1, &m_viewport);
+
+		m_scissor.offset = { 0,0 };
+		m_scissor.extent = m_swapchainExtent;
+		vkCmdSetScissor(frame.m_mainCommandBuffer, 0, 1, &m_scissor);
+
+		/*float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
+		glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
+		glm::mat4 view = m_camera.getViewMatrix();
+		glm::mat4 model = glm::rotate(glm::mat4(1.0f), (float)glfwGetTime() * glm::radians(45.0f), glm::vec3(0, 1, 0));
+		glm::mat4 final_matrix = projection * view * model;
+		vkCmdPushConstants(frame.m_mainCommandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &final_matrix);
+	
+
+		for (auto& mesh : m_model.meshes) {
+			if (mesh.vertexBuffer.buffer == VK_NULL_HANDLE) continue;
+
+			VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
+				? mesh.material->textureSet : m_defaultTextureSet;
+
+			// 绑定描述符集 (Set 0)
+			// 注意：m_pipelineLayout 必须是那个包含了 m_singleTextureLayout 的布局
+			vkCmdBindDescriptorSets(frame.m_mainCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				m_pipelineLayout, 0, 1, &set_to_bind, 0, nullptr);
+
+			// 绑定顶点和索引
+			VkBuffer vBuffers[] = { mesh.vertexBuffer.buffer };
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindVertexBuffers(frame.m_mainCommandBuffer, 0, 1, vBuffers, offsets);
+			vkCmdBindIndexBuffer(frame.m_mainCommandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			// 绘制
+			vkCmdDrawIndexed(frame.m_mainCommandBuffer, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+		}
+		*/
+
+		if (m_activeWorld) {
+			drawWorld(frame.m_mainCommandBuffer, *m_activeWorld);
+		}
+
+
+	vkCmdEndRenderPass(frame.m_mainCommandBuffer);
+
+	transitionImageLayout(frame.m_mainCommandBuffer, m_viewportImage.image, m_swapchainImageFormat,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+	std::array<VkClearValue, 2> uiClearValues{};
+	uiClearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+	uiClearValues[1].depthStencil = { 1.0f, 0 };
+
+	VkRenderPassBeginInfo uiRpInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	uiRpInfo.renderPass = m_uiRenderPass;
+	uiRpInfo.renderArea.extent = m_swapchainExtent;
+	uiRpInfo.framebuffer = m_frameBuffers[imageIndex]; // 渲染目标：真正的屏幕
+	uiRpInfo.clearValueCount = 2;
+	uiRpInfo.pClearValues = uiClearValues.data();
+
+	vkCmdBeginRenderPass(frame.m_mainCommandBuffer, &uiRpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// 录制编辑器的 UI 绘制指令
+		m_editor->draw(frame.m_mainCommandBuffer);
+
+	vkCmdEndRenderPass(frame.m_mainCommandBuffer);
+
+
+
+	if (vkEndCommandBuffer(frame.m_mainCommandBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to record command buffer!");
+	}
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = &frame.m_presentSemaphore;	// 等待图像获取完毕
+	submitInfo.pWaitDstStageMask = waitStages;
+
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &frame.m_mainCommandBuffer;
+
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &frame.m_renderSemaphore;	// 发送渲染完毕信号
+
+	if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, frame.m_renderFence) != VK_SUCCESS) {
+		throw std::runtime_error("failed to submit draw command buffer!");
+	}
+
+	// 呈现图像
+	VkPresentInfoKHR presentInfo{};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = &frame.m_renderSemaphore; // 等待渲染完毕
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = &m_swapchain;
+	presentInfo.pImageIndices = &imageIndex;
+
+	result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
+		m_framebufferResized = false;
+		recreateSwapchain();
+	}
+
+	ImGuiIO& io = ImGui::GetIO();
+	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+		vkQueueWaitIdle(m_graphicsQueue);
+		ImGui::UpdatePlatformWindows();
+		ImGui::RenderPlatformWindowsDefault();
+	}
+
+	m_frameNumber++;
+}
+
+void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+	VkImageMemoryBarrier barrier{};
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.oldLayout = oldLayout;
+	barrier.newLayout = newLayout;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.baseMipLevel = 0;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.baseArrayLayer = 0;
+	barrier.subresourceRange.layerCount = 1;
+
+	VkPipelineStageFlags sourceStage;
+	VkPipelineStageFlags destinationStage;
+
+	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // 场景画完
+		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;        // UI 开始采样
+	}
+	else if ((oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL || oldLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+		&& newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) 
+	{
+		barrier.srcAccessMask = (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) ? 0 : VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        sourceStage = (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	}
+	else {
+		std::cout << oldLayout << " " << newLayout << std::endl;
+		throw std::invalid_argument("unsupported layout transition!");
+	}
+
+	vkCmdPipelineBarrier(cmd, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
+
+// ----------------------Handle External Events------------------------
+
+void ErisEngine::handleInput(float deltaTime)
+{
+	// 1. 键盘移动逻辑 (WASD)
+	glm::vec3 moveDir(0.0f);
+	// 前后
+	if (glfwGetKey(m_window, GLFW_KEY_W) == GLFW_PRESS) moveDir += m_camera.m_front;
+	if (glfwGetKey(m_window, GLFW_KEY_S) == GLFW_PRESS) moveDir -= m_camera.m_front;
+	// 左右 (通过叉乘计算右方向向量)
+	glm::vec3 right = glm::normalize(glm::cross(m_camera.m_front, m_camera.m_up));
+	if (glfwGetKey(m_window, GLFW_KEY_A) == GLFW_PRESS) moveDir -= right;
+	if (glfwGetKey(m_window, GLFW_KEY_D) == GLFW_PRESS) moveDir += right;
+
+	if (glm::length(moveDir) > 0.0f) {
+		m_camera.processKeyboard(glm::normalize(moveDir), deltaTime);
+	}
+
+	// 2. 鼠标旋转逻辑 (模拟 UE5：按住右键时旋转)
+	if (glfwGetMouseButton(m_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+		if (!m_isMousePressed) {
+			// 初次按下时记录位置，防止视角跳变
+			glfwGetCursorPos(m_window, &m_lastX, &m_lastY);
+			m_isMousePressed = true;
+			// 像编辑器一样隐藏鼠标，允许无限旋转
+			glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		}
+
+		double xpos, ypos;
+		glfwGetCursorPos(m_window, &xpos, &ypos);
+
+		float xoffset = static_cast<float>(xpos - m_lastX);
+		float yoffset = static_cast<float>(ypos - m_lastY);
+
+		m_lastX = xpos;
+		m_lastY = ypos;
+
+		m_camera.processMouse(xoffset, yoffset);
+	}
+	else {
+		if (m_isMousePressed) {
+			m_isMousePressed = false;
+			// 释放右键后恢复鼠标显示
+			glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		}
+	}
+}
+
+void ErisEngine::initViewportResources()
+{
+	// 1. 创建离屏图像 (m_viewportImage)
+	VkFormat colorFormat= m_swapchainImageFormat;
+	VkExtent3D extent = { m_swapchainExtent.width, m_swapchainExtent.height, 1 };
+
+	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = colorFormat;
+	imgInfo.extent = extent;
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	VmaAllocationCreateInfo allocationInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	if (vmaCreateImage(m_allocator, &imgInfo, &allocationInfo,
+		&m_viewportImage.image, &m_viewportImage.allocation, nullptr) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create viewport image!");
+	};
+
+	m_viewportImage.imageView = createImageView(m_viewportImage.image, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+
+	// 2. 创建视口 Framebuffer
+	// 注意：这里必须包含 颜色附件(视口图) 和 深度附件(深度图)
+	std::array<VkImageView, 2> attachments = { m_viewportImage.imageView, m_depthImage.imageView };
+
+	VkFramebufferCreateInfo fbInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fbInfo.renderPass = m_renderPass;
+	fbInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+	fbInfo.pAttachments = attachments.data();
+	fbInfo.width = m_swapchainExtent.width;
+	fbInfo.height = m_swapchainExtent.height;
+	fbInfo.layers = 1;
+
+	// 关键点：确保赋值给类成员 m_viewportFramebuffer
+	if (vkCreateFramebuffer(m_device, &fbInfo, nullptr, &m_viewportFramebuffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create viewport framebuffer!");
+	}
+
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
+			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}); 
+
+	if (m_viewportTextureSet != VK_NULL_HANDLE) {
+		ImGui_ImplVulkan_RemoveTexture(m_viewportTextureSet);
+	}
+
+	// 3. 将离屏贴图交给 ImGui 注册
+	// 注意：如果是重构交换链，ImGui 会处理旧的贴图 ID，或者你需要手动 RemoveTexture
+	m_viewportTextureSet = ImGui_ImplVulkan_AddTexture(m_sampler, m_viewportImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+void ErisEngine::cleanViewportResources()
+{
+	if (m_viewportFramebuffer != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(m_device, m_viewportFramebuffer, nullptr);
+		m_viewportFramebuffer = VK_NULL_HANDLE;
+	}
+	if (m_viewportImage.imageView != VK_NULL_HANDLE) {
+		vkDestroyImageView(m_device, m_viewportImage.imageView, nullptr);
+		m_viewportImage.imageView = VK_NULL_HANDLE;
+	}
+	if (m_viewportImage.image != VK_NULL_HANDLE) {
+		vmaDestroyImage(m_allocator, m_viewportImage.image, m_viewportImage.allocation);
+		m_viewportImage.image = VK_NULL_HANDLE;
+	}
+}
+
+
+bool ErisEngine::loadMeshFromFile(const std::string& filename, Mesh& outMesh)
+{
+	Assimp::Importer importer;
+
+	const aiScene* scene = importer.ReadFile(filename,
+		aiProcess_Triangulate |
+		aiProcess_FlipUVs |
+		aiProcess_CalcTangentSpace |
+		aiProcess_JoinIdenticalVertices
+	);
+	
+	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+		std::cerr << "ASSIP ERROR: " << importer.GetErrorString() << std::endl;
+		return false;
+	}
+
+	aiMesh* mesh = scene->mMeshes[0];
+
+	outMesh.vertices.clear();
+	outMesh.indices.clear();
+
+	for (uint32_t i = 0; i < mesh->mNumVertices; i++) {
+		Vertex vertex;
+		vertex.pos = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
+		
+		if (mesh->HasNormals()) {
+			vertex.normal = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+		}
+		if (mesh->mTextureCoords[0]) {
+			vertex.uv = { mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y };
+		}
+		else {
+			vertex.uv = { 0.0f, 0.0f };
+		}
+
+		// 颜色 (如果模型带顶点色，否则默认白色)
+		if (mesh->HasVertexColors(0)) {
+			vertex.color = { mesh->mColors[0][i].r, mesh->mColors[0][i].g, mesh->mColors[0][i].b };
+		}
+		else {
+			vertex.color = { 1.0f, 1.0f, 1.0f };
+		}
+
+		outMesh.vertices.push_back(vertex);
+	}
+
+	for (uint32_t i = 0; i < mesh->mNumFaces; i++) {
+		aiFace face = mesh->mFaces[i];
+		for (uint32_t j = 0; j < face.mNumIndices; j++) {
+			outMesh.indices.push_back(face.mIndices[j]);
+		}
+	}
+
+	return true;
+}
+
+
+
+bool ErisEngine::loadModelFromFile(const std::string& filename, Model& outModel)
+{
+	Assimp::Importer importer;
+	// 关键：PreTransformVertices 拍扁层级，FlipUVs 适配 Vulkan
+	const aiScene* scene = importer.ReadFile(filename,
+		aiProcess_Triangulate |
+		aiProcess_FlipUVs |
+		aiProcess_JoinIdenticalVertices |
+		aiProcess_PreTransformVertices |
+		aiProcess_GenSmoothNormals); // 确保如果没有法线则自动生成
+
+	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+		std::cerr << "ASSIMP ERROR: " << importer.GetErrorString() << std::endl;
+		return false;
+	}
+
+	// 获取文件夹路径用于加载贴图
+	std::string directory = filename.substr(0, filename.find_last_of("\\/"));
+
+	// std::cout << directory << std::endl;
+	outModel.meshes.clear();
+	outModel.materials.clear();
+
+	// --- 第一步：加载所有材质 (MTL) ---
+	// 预分配空间，防止 vector 扩容导致指针失效
+	outModel.materials.reserve(scene->mNumMaterials);
+
+	std::cout << scene->mNumMaterials << std::endl;
+
+	for (uint32_t i = 0; i < scene->mNumMaterials; i++) {
+		aiMaterial* aiMat = scene->mMaterials[i];
+		Material engineMat;
+		//engineMat.textureSet = m_defaultTextureSet;
+
+		// 1. 获取 Diffuse 颜色 (Kd)
+		//aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
+		//aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor);
+		// 我们暂时将颜色存入每一个顶点（见下文网格加载环节）
+
+		// 2. 加载贴图 (map_Kd)
+		aiString path;
+		if (aiMat->GetTexture(aiTextureType_DIFFUSE, 0, &path) == AI_SUCCESS) {
+			std::string dir = filename.substr(0, filename.find_last_of("\\/"));
+			std::string fullTexPath = dir + "/" + path.C_Str();
+
+			std::cout << fullTexPath << std::endl;
+
+			engineMat.diffuseTexture = loadImageFromFile(fullTexPath.c_str());
+			engineMat.textureSet = createDescriptorSet(engineMat.diffuseTexture);
+		}
+		
+
+		outModel.materials.push_back(engineMat);
+	}
+
+	// --- 第二步：加载所有网格 (Mesh) ---
+	for (unsigned int m = 0; m < scene->mNumMeshes; m++) {
+		aiMesh* aiMeshPtr = scene->mMeshes[m];
+		Mesh localMesh;
+
+		// 获取对应的材质颜色作为顶点底色
+		aiMaterial* aiMat = scene->mMaterials[aiMeshPtr->mMaterialIndex];
+		aiColor3D kd(1.0f, 1.0f, 1.0f);
+		aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, kd);
+
+		outModel.minBound = glm::vec3(FLT_MAX);
+		outModel.maxBound = glm::vec3(-FLT_MAX);
+
+		// 填充顶点
+		for (uint32_t i = 0; i < aiMeshPtr->mNumVertices; i++) {
+			Vertex v;
+			v.pos = { aiMeshPtr->mVertices[i].x, aiMeshPtr->mVertices[i].y, aiMeshPtr->mVertices[i].z };
+			localMesh.minBound = glm::min(localMesh.minBound, v.pos);
+			localMesh.maxBound = glm::max(localMesh.maxBound, v.pos);
+			if (aiMeshPtr->HasNormals()) {
+				v.normal = { aiMeshPtr->mNormals[i].x, aiMeshPtr->mNormals[i].y, aiMeshPtr->mNormals[i].z };
+			}
+
+			if (aiMeshPtr->mTextureCoords[0]) {
+				v.uv = { aiMeshPtr->mTextureCoords[0][i].x, aiMeshPtr->mTextureCoords[0][i].y };
+			}
+			else {
+				v.uv = { 0.0f, 0.0f };
+			}
+
+			// 颜色：使用 MTL 的 Kd 颜色
+			v.color = { kd.r, kd.g, kd.b };
+
+			localMesh.vertices.push_back(v);
+		}
+
+		// 填充索引
+		for (uint32_t i = 0; i < aiMeshPtr->mNumFaces; i++) {
+			aiFace face = aiMeshPtr->mFaces[i];
+			for (uint32_t j = 0; j < face.mNumIndices; j++) {
+				localMesh.indices.push_back(face.mIndices[j]);
+			}
+		}
+
+		// 关联材质指针
+		if (aiMeshPtr->mMaterialIndex < outModel.materials.size()) {
+			localMesh.material = &outModel.materials[aiMeshPtr->mMaterialIndex];
+		}
+
+		outModel.minBound = glm::min(outModel.minBound, localMesh.minBound);
+		outModel.maxBound = glm::max(outModel.maxBound, localMesh.maxBound);
+		outModel.meshes.push_back(localMesh);
+	}
+
+
+	// --- 第三步：上传 GPU ---
+	for (auto& m : outModel.meshes) {
+		m.uploadMesh(m_allocator, this);
+	}
+
+	std::cout << "[Engine] Successfully loaded " << filename << " with " << outModel.meshes.size() << " parts." << std::endl;
+	return true;
+}
+
+AllocatedImage ErisEngine::loadImageFromFile(const char* file)
+{
+	int texWidth, texHeight, texChannels;
+
+	// 1. 使用 stb_image 加载像素数据（强制为 4 通道 RGBA）
+	stbi_uc* pixels = stbi_load(file, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+	if (!pixels) {
+		std::cerr << "Failed to load texture file: " << file << std::endl;
+		// 返回一个空的句柄，防止崩溃
+		return AllocatedImage{ VK_NULL_HANDLE, VK_NULL_HANDLE, nullptr };
+	}
+
+	VkDeviceSize imageSize = texWidth * texHeight * 4;
+	VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB; // 颜色贴图建议使用 SRGB
+
+	// 2. 创建暂存缓冲 (Staging Buffer)
+	VkBufferCreateInfo stagingInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	stagingInfo.size = imageSize;
+	stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+	VmaAllocationCreateInfo stagingAllocInfo{};
+	stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+	AllocatedBuffer stagingBuffer;
+	vmaCreateBuffer(m_allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr);
+
+	// 拷贝像素数据到暂存缓冲
+	void* data;
+	vmaMapMemory(m_allocator, stagingBuffer.allocation, &data);
+	memcpy(data, pixels, static_cast<size_t>(imageSize));
+	vmaUnmapMemory(m_allocator, stagingBuffer.allocation);
+	stbi_image_free(pixels); // 释放内存中的像素
+
+	// 3. 创建 GPU 图像 (VkImage)
+	VkExtent3D imageExtent;
+	imageExtent.width = static_cast<uint32_t>(texWidth);
+	imageExtent.height = static_cast<uint32_t>(texHeight);
+	imageExtent.depth = 1;
+
+	VkImageCreateInfo dimg_info{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	dimg_info.imageType = VK_IMAGE_TYPE_2D;
+	dimg_info.format = imageFormat;
+	dimg_info.extent = imageExtent;
+	dimg_info.mipLevels = 1;
+	dimg_info.arrayLayers = 1;
+	dimg_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	dimg_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	dimg_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT; // 既能接收拷贝，又能被 Shader 采样
+
+	VmaAllocationCreateInfo dimg_allocinfo{};
+	dimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+	AllocatedImage newImage;
+	vmaCreateImage(m_allocator, &dimg_info, &dimg_allocinfo, &newImage.image, &newImage.allocation, nullptr);
+
+	// 4. 将数据从 Buffer 拷贝到 Image (利用 immediateSubmit)
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		// A. 转换布局：Undefined -> Transfer Destination (准备接收数据)
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		// B. 执行拷贝
+		VkBufferImageCopy copyRegion{};
+		copyRegion.bufferOffset = 0;
+		copyRegion.bufferRowLength = 0;
+		copyRegion.bufferImageHeight = 0;
+		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.imageSubresource.mipLevel = 0;
+		copyRegion.imageSubresource.baseArrayLayer = 0;
+		copyRegion.imageSubresource.layerCount = 1;
+		copyRegion.imageExtent = imageExtent;
+
+		vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+		// C. 转换布局：Transfer Destination -> Shader Read Only (准备给 Shader 用)
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		});
+
+	// 5. 创建 Image View
+	newImage.imageView = createImageView(newImage.image, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+
+	// 6. 清理暂存缓冲
+	vmaDestroyBuffer(m_allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+
+	return newImage;
+}
+
+void ErisEngine::initDefaultResources() {
+	// 1. 定义一个纯白色像素 (RGBA)
+	uint32_t whitePixel = 0xFFFFFFFF;
+
+	// 2. 创建暂存缓冲 (Staging Buffer) - 必须确保 CPU 可见
+	VkBufferCreateInfo stagingInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	stagingInfo.size = 4;
+	stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+	VmaAllocationCreateInfo stagingAllocInfo{};
+	// 修正点：对于这种极小的暂存缓冲，使用 CPU_ONLY 是最稳健的，保证 HOST_VISIBLE 和 HOST_COHERENT
+	stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+	AllocatedBuffer stagingBuffer;
+	// 这里不需要传 VmaAllocationInfo 了，因为我们后面手动 Map
+	if (vmaCreateBuffer(m_allocator, &stagingInfo, &stagingAllocInfo,
+		&stagingBuffer.buffer, &stagingBuffer.allocation, nullptr) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create staging buffer for default texture");
+	}
+
+	// 拷贝数据
+	void* data;
+	vmaMapMemory(m_allocator, stagingBuffer.allocation, &data);
+	memcpy(data, &whitePixel, 4);
+	vmaUnmapMemory(m_allocator, stagingBuffer.allocation);
+
+	// 3. 创建 1x1 GPU 图像
+	VkExtent3D extent = { 1, 1, 1 };
+	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+	imgInfo.extent = extent;
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	VmaAllocationCreateInfo gpuImageAllocInfo{};
+	gpuImageAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY; // 图像数据仅 GPU 访问
+
+	if (vmaCreateImage(m_allocator, &imgInfo, &gpuImageAllocInfo,
+		&m_defaultTexture.image, &m_defaultTexture.allocation, nullptr) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create 1x1 default image");
+	}
+
+	// 4. 利用之前写好的 transitionImageLayout 进行布局转换和拷贝
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		// A. 转换布局为接收端
+		transitionImageLayout(cmd, m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		// B. 拷贝缓冲区到图像
+		VkBufferImageCopy copyRegion{};
+		copyRegion.bufferOffset = 0;
+		copyRegion.bufferRowLength = 0;
+		copyRegion.bufferImageHeight = 0;
+		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.imageSubresource.mipLevel = 0;
+		copyRegion.imageSubresource.baseArrayLayer = 0;
+		copyRegion.imageSubresource.layerCount = 1;
+		copyRegion.imageExtent = extent;
+
+		vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, m_defaultTexture.image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+		// C. 转换为 Shader 可读布局
+		transitionImageLayout(cmd, m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		});
+
+	// 5. 创建视图
+	m_defaultTexture.imageView = createImageView(m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+
+	// 6. 创建默认描述符集 (这个函数你应该已经实现好了)
+	m_defaultTextureSet = createDescriptorSet(m_defaultTexture);
+
+	// 7. 清理暂存缓冲 (临时工，立即销毁)
+	vmaDestroyBuffer(m_allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+
+	// 8. 注册保底贴图的销毁逻辑到 DeletionQueue
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, m_defaultTexture.imageView, nullptr);
+		vmaDestroyImage(m_allocator, m_defaultTexture.image, m_defaultTexture.allocation);
+		});
+}
+
+
+
+// ---------------------------World Functions---------------------------------
+
+
+Model* ErisEngine::getOrLoadModel(const std::string& path) {
+	// 1. 如果模型已经在池子里了，直接返回指针
+	if (m_assetLibrary.find(path) != m_assetLibrary.end()) {
+		return &m_assetLibrary[path];
+	}
+
+	// 2. 创建新 Model 容器
+	Model& newModel = m_assetLibrary[path];
+
+	// 3. 执行真正的磁盘加载
+	if (loadModelFromFile(path, newModel)) {
+		// 4. 上传到 GPU（调用你之前的 uploadModel）
+		newModel.uploadModel(m_allocator, this);
+		return &newModel;
+	}
+
+	// 5. 加载失败则清理 map
+	m_assetLibrary.erase(path);
+	std::cerr << "Failed to import model: " << path << std::endl;
+	return nullptr;
+}
+
+void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
+	// 1. 获取通用的 View 和 Projection（一帧只需计算一次）
+	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
+	glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
+	glm::mat4 view = m_camera.getViewMatrix();
+
+	// 2. 遍历世界里所有的物体
+	for (auto& objPtr : world.getObjects()) {
+		RenderObject& obj = *objPtr;
+
+		if (!obj.m_pModel) continue;
+
+		// --- 这里就是你原本计算 final_matrix 的地方，但现在是动态的 ---
+		glm::mat4 modelMatrix = obj.getTransformMatrix();
+
+		MeshPushConstants constants;
+		constants.render_matrix = projection * view * modelMatrix;
+		constants.model_matrix = modelMatrix;
+
+		// 推送当前物体的矩阵
+		vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+
+		// --- 这里是你原本遍历 mesh 的循环 ---
+		for (auto& mesh : obj.m_pModel->meshes) {
+			if (mesh.vertexBuffer.buffer == VK_NULL_HANDLE) continue;
+
+			// 绑定描述符集 (Set 0)
+			VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
+				? mesh.material->textureSet : m_defaultTextureSet;
+
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				m_pipelineLayout, 0, 1, &set_to_bind, 0, nullptr);
+
+			// 绑定顶点和索引
+			VkBuffer vBuffers[] = { mesh.vertexBuffer.buffer };
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindVertexBuffers(cmd, 0, 1, vBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			// 绘制
+			vkCmdDrawIndexed(cmd, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+		}
+	}
+}
+
+RenderObject* ErisEngine::pickObject(float mouseX, float mouseY)
+{
+	// mouseX, mouseY 是你从 ImGui 传进来的 [0.0, 1.0] 的相对比例坐标
+
+	// 1. 转换为 NDC (Normalized Device Coordinates)
+	// Vulkan 的 NDC: x 在 [-1, 1], y 在 [-1, 1]
+	float x_ndc = (mouseX * 2.0f) - 1.0f;
+	float y_ndc = (mouseY * 2.0f) - 1.0f;
+
+	// 2. 获取相机矩阵
+	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
+	glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
+	glm::mat4 view = m_camera.getViewMatrix();
+
+	// 【重要：Vulkan 特有的逆矩阵处理】
+	// 渲染时我们为了适配屏幕做了 projection[1][1] *= -1;
+	// 在计算射线时，这个翻转必须保留，因为我们要和渲染出的画面完全对齐！
+	glm::mat4 invVP = glm::inverse(projection * view);
+
+	// 3. 生成世界空间中的射线
+	// Vulkan 近平面 z = 0.0, 远平面 z = 1.0 (这是 Vulkan 和 OpenGL 最大的区别！)
+	glm::vec4 screenPosNear(x_ndc, y_ndc, 0.0f, 1.0f);
+	glm::vec4 screenPosFar(x_ndc, y_ndc, 1.0f, 1.0f);
+
+	// 通过逆矩阵转回世界空间
+	glm::vec4 worldPosNear = invVP * screenPosNear;
+	glm::vec4 worldPosFar = invVP * screenPosFar;
+
+	// 透视除法
+	worldPosNear /= worldPosNear.w;
+	worldPosFar /= worldPosFar.w;
+
+	// 得到世界空间射线
+	glm::vec3 rayOrigin = glm::vec3(worldPosNear);
+	glm::vec3 rayDir = glm::normalize(glm::vec3(worldPosFar) - rayOrigin);
+
+	// 4. 遍历检测
+	RenderObject* closestObj = nullptr;
+	float minDistance = FLT_MAX;
+
+	for (auto& objPtr : m_activeWorld->getObjects()) {
+		glm::vec3 bMin, bMax;
+		// 获取物体在世界空间（已经乘过 Model 矩阵）的包围盒
+		objPtr->getWorldBounds(bMin, bMax);
+
+		float t;
+		// 在【世界空间】执行射线与 AABB 的求交
+		if (m_activeWorld->rayIntersectAABB(rayOrigin, rayDir, bMin, bMax, t)) {
+			if (t < minDistance) {
+				minDistance = t;
+				closestObj = objPtr.get();
+			}
+		}
+	}
+
+	return closestObj;
+}
