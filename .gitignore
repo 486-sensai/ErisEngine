@@ -7,3 +7,13 @@
 /x64/Debug
 /packages
 /.vs
+/ErisEngine/src/ErisEngine.cpp
+/ErisEngine/assets
+/ErisEngine/shaders
+/ErisEngine/src
+/ErisEngine/ErisEngine.vcxproj
+/ErisEngine/ErisEngine.vcxproj.filters
+/ErisEngine/ErisEngine.vcxproj.user
+/ErisEngine/imgui.ini
+/ErisEngine/packages.config
+/ErisEngine.sln
