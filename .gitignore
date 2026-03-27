@@ -2,7 +2,6 @@
 # 此 .gitignore 文件已由 Microsoft(R) Visual Studio 自动创建。
 ################################################################################
 
-/ErisEngine/third_party
 /ErisEngine/x64/Debug
 /x64/Debug
 /packages
@@ -18,3 +17,28 @@
 /ErisEngine/shaders
 /ErisEngine/assets/roadBike.mtl
 /ErisEngine/assets/roadBike.obj
+/ErisEngine/third_party/JoltPhysics-master
+/ErisEngine/third_party/assimp-master
+/ErisEngine/third_party/glfw-3.4.bin.WIN64
+/ErisEngine/third_party/imgui-docking
+/ErisEngine/third_party/ImGuizmo-master
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Bin-ARM64
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Bin
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/cmake
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Config
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Helpers
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/installerResources
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Lib-ARM64
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/components.xml
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/InstallationLog.txt
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/installer.dat
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Lib
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Licenses
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/maintenancetool.dat
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/maintenancetool.exe
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/maintenancetool.ini
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/network.xml
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/README.txt
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/share/vulkan/registry
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Source/SPIRV-Reflect
+/ErisEngine/third_party/VulkanSDK/1.4.335.0/Templates
