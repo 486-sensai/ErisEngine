@@ -76,18 +76,23 @@ int ErisEngine::Eris_init()
 	m_editor->init(this);
 	initViewportResources();
 	initDefaultResources();
-	if (loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
-		m_model.uploadModel(m_allocator, this);
 
+	if (!loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
+		throw std::runtime_error("failed to load model!");
+	}
+	m_model.uploadModel(m_allocator, this);
+	
+	// debug用 测试对象
+	{
 		// 生成两辆车，放在不同位置
 		RenderObject* car1 = m_activeWorld->spawnObject(&m_model, "Main_Car");
 		car1->m_location = glm::vec3(0.0f, 0.0f, 0.0f);
 
 		RenderObject* car2 = m_activeWorld->spawnObject(&m_model, "Backup_Car");
-		car2->m_location = glm::vec3(5.0f, 0.0f, -2.0f);
+		car2->m_initialLocation=car2->m_location = glm::vec3(5.0f, 0.0f, -2.0f);
 		car2->m_scale = glm::vec3(0.5f);
-	}
 
+	}
 	m_camera.m_position = glm::vec3(0.0f, 1.0f, 3.0f);
 
 

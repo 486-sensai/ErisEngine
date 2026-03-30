@@ -7,12 +7,22 @@ ErisWorld::ErisWorld()
 
 ErisWorld::~ErisWorld()
 {
+    for (auto& obj : m_objects) {
+        if (obj->m_physicsEnabled) {
+            m_physics.destroyBody(obj->m_bodyID);
+        }
+    }
     m_physics.cleanup();
 }
 
 RenderObject* ErisWorld::spawnObject(Model* model, const std::string& name) {
     auto newObject = std::make_unique<RenderObject>(model, name);
     RenderObject* ptr = newObject.get();
+
+    ptr->m_initialLocation = ptr->m_location;
+    ptr->m_initialRotation = ptr->m_rotation;
+    ptr->m_initialScale = ptr->m_scale;
+
     m_objects.push_back(std::move(newObject));
     return ptr;
 }
@@ -47,6 +57,8 @@ void ErisWorld::update(float deltaTime) {
     // 2. 将物理计算后的结果写回给 RenderObject
     for (auto& obj : m_objects) {
         if (obj->m_physicsEnabled) {
+            extern bool G_IsGizmoUsing;
+
             glm::vec3 newPos, newRot;
             // 从 Jolt 拿回位置和旋转（欧拉角）
             m_physics.getTransform(obj->m_bodyID, newPos, newRot);

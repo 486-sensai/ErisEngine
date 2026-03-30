@@ -293,6 +293,14 @@ void ErisEditor::show_viewport(ErisEngine* engine)
             engine->m_selectedObject->m_location = glm::make_vec3(matrixTranslation);
             engine->m_selectedObject->m_rotation = glm::make_vec3(matrixRotation);
             engine->m_selectedObject->m_scale = glm::make_vec3(matrixScale);
+
+            if (engine->m_selectedObject->m_physicsEnabled) {
+                engine->m_activeWorld->getPhysics().setTransform(
+                    engine->m_selectedObject->m_bodyID,
+                    engine->m_selectedObject->m_location,
+                    engine->m_selectedObject->m_rotation
+                );
+            }
         }
     }
 
@@ -305,22 +313,32 @@ void ErisEditor::show_details(ErisEngine* engine)
     ImGui::Begin("Details");
 
     if (engine->m_selectedObject) {
+        // Transform part
         RenderObject* obj = engine->m_selectedObject;
 
         ImGui::Text("Object Name: %s", obj->m_name.c_str());
         ImGui::Separator();
 
         // 绑定数据到 UI 控件
-        ImGui::DragFloat3("Location", &obj->m_location.x, 0.1f);
-        ImGui::DragFloat3("Rotation", &obj->m_rotation.x, 1.0f);
+        if (ImGui::DragFloat3("Location", &obj->m_location.x, 0.1f)) {
+            if (obj->m_physicsEnabled) {
+                engine->m_activeWorld->getPhysics().setTransform(obj->m_bodyID, obj->m_location, obj->m_rotation);
+            }
+        }
+        if (ImGui::DragFloat3("Location", &obj->m_location.x, 0.1f)) {
+            if (obj->m_physicsEnabled) {
+                engine->m_activeWorld->getPhysics().setTransform(obj->m_bodyID, obj->m_location, obj->m_rotation);
+            }
+        }
         ImGui::DragFloat3("Scale", &obj->m_scale.x, 0.01f);
 
-        ImGui::Separator();
+        ImGui::Separator();     // ------------------------------------------------------------------
+        // physics simulation part
         ImGui::Text("Physics");
 
         // 按钮：为选中的物体开启物理
         if (!obj->m_physicsEnabled) {
-            if (ImGui::Button("Enable Gravity")) {
+            if (ImGui::Button("Enable Physics", ImVec2(-1, 0))) {
                 obj->m_physicsEnabled = true;
 
                 // 计算该模型的包围盒大小作为碰撞形状
@@ -336,15 +354,37 @@ void ErisEditor::show_details(ErisEngine* engine)
             }
         }
         else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
             ImGui::TextColored(ImVec4(0, 1, 0, 1), "Physics Active");
-            if (ImGui::Button("Reset Object")) {
+            if (ImGui::Button("Disable Physics", ImVec2(-1, 0))) {
+
+                // 1. 从 Jolt 物理世界移除
+                engine->m_activeWorld->getPhysics().destroyBody(obj->m_bodyID);
+
+                // 2. 重置标志位
+                obj->m_physicsEnabled = false;
+
+                // 3. 将 ID 设为无效
+                obj->m_bodyID = JPH::BodyID();
+            }
+            ImGui::PopStyleColor();
+
+            if (ImGui::Button("Reset Object", ImVec2(-1, 0))) {
                 // 以后可以写把物体瞬移回原位的逻辑
+                engine->m_selectedObject->resetToInitialState();
+                engine->m_activeWorld->getPhysics().resetBodyState(
+                    engine->m_selectedObject->m_bodyID,
+                    engine->m_selectedObject->m_initialLocation,
+                    engine->m_selectedObject->m_initialRotation,
+                    engine->m_selectedObject->m_initialScale
+                );
+
             }
         }
 
     }
     else {
-        ImGui::Text("No object selected in Outliner.");
+        ImGui::Text("Select an object to edit.");
     }
 
 

@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{5c4637d1-7fb3-40ad-bf53-d371f03167ba}</ProjectGuid>
+    <RootNamespace>ErisEngine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanMemoryAllocator-master\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanMemoryAllocator-master\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;JPH_USE_AVX2;JPH_FLOATING_POINT_EXCEPTIONS_ENABLED;JPH_PROFILE_ENABLED;JPH_DEBUG_RENDERER;JPH_OBJECT_STREAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\JoltPhysics-master;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\imgui-docking;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include\glm;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include\vma;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\lib-vc2022;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Lib;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\JoltPhysics-master\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;Jolt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\JoltPhysics-master;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\imgui-docking;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include\glm;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Include\vma;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\glfw-3.4.bin.WIN64\lib-vc2022;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\VulkanSDK\1.4.335.0\Lib;D:\Users\Alice486\source\repos\ErisEngine\ErisEngine\ErisEngine\third_party\JoltPhysics-master\Build\VS2022_CL\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;Jolt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\ErisPhysics.cpp" />
+    <ClCompile Include="src\ErisWorld.cpp" />
+    <ClCompile Include="src\RenderObject.cpp" />
+    <ClCompile Include="src\ErisEditor.cpp" />
+    <ClCompile Include="src\StbImageImplementation.cpp" />
+    <ClCompile Include="src\VulkanType.cpp" />
+    <ClCompile Include="src\VulkanPipelineBuilder.cpp" />
+    <ClCompile Include="src\DeletionQueue.cpp" />
+    <ClCompile Include="src\ErisEngine.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\VmaUsage.cpp" />
+    <ClCompile Include="src\VulkanInitializers.cpp" />
+    <ClCompile Include="third_party\imgui-docking\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="third_party\imgui-docking\backends\imgui_impl_vulkan.cpp" />
+    <ClCompile Include="third_party\imgui-docking\imgui.cpp" />
+    <ClCompile Include="third_party\imgui-docking\imgui_demo.cpp" />
+    <ClCompile Include="third_party\imgui-docking\imgui_draw.cpp" />
+    <ClCompile Include="third_party\imgui-docking\imgui_tables.cpp" />
+    <ClCompile Include="third_party\imgui-docking\imgui_widgets.cpp" />
+    <ClCompile Include="third_party\ImGuizmo-master\ImGuizmo.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\Camera.h" />
+    <ClInclude Include="include\DeletionQueue.h" />
+    <ClInclude Include="include\ErisEditor.h" />
+    <ClInclude Include="include\ErisEngine.h" />
+    <ClInclude Include="include\ErisPhysics.h" />
+    <ClInclude Include="include\ErisWorld.h" />
+    <ClInclude Include="include\Mesh.h" />
+    <ClInclude Include="include\RenderObject.h" />
+    <ClInclude Include="include\VulkanInitializers.h" />
+    <ClInclude Include="include\VulkanPipelineBuilder.h" />
+    <ClInclude Include="include\VulkanType.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="shaders\triangle.frag" />
+    <None Include="shaders\triangle.vert" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\Assimp.redist.3.0.0\build\native\Assimp.redist.targets" Condition="Exists('..\packages\Assimp.redist.3.0.0\build\native\Assimp.redist.targets')" />
+    <Import Project="..\packages\Assimp.3.0.0\build\native\Assimp.targets" Condition="Exists('..\packages\Assimp.3.0.0\build\native\Assimp.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>这台计算机上缺少此项目引用的 NuGet 程序包。使用“NuGet 程序包还原”可下载这些程序包。有关更多信息，请参见 http://go.microsoft.com/fwlink/?LinkID=322105。缺少的文件是 {0}。</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\Assimp.redist.3.0.0\build\native\Assimp.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Assimp.redist.3.0.0\build\native\Assimp.redist.targets'))" />
+    <Error Condition="!Exists('..\packages\Assimp.3.0.0\build\native\Assimp.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Assimp.3.0.0\build\native\Assimp.targets'))" />
+  </Target>
+</Project>

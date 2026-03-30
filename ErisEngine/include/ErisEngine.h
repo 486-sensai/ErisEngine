@@ -46,6 +46,9 @@ struct FrameData {
 	VkSemaphore m_presentSemaphore;
 	VkSemaphore m_renderSemaphore;
 	VkFence m_renderFence;
+
+	AllocatedBuffer sceneDataBuffer;
+	VkDescriptorSet sceneDescriptorSet;
 };
 
 struct MeshPushConstants {
@@ -150,10 +153,7 @@ private:
 	VkDescriptorPool m_descriptorPool;
 	VkSampler m_sampler;
 
-	VkDescriptorPool m_imguiPool;
-
-	AllocatedBuffer m_vertexBuffer;
-	AllocatedBuffer m_indexBuffer;
+	VkDescriptorSetLayout m_globalSetLayout; // 全局数据的“插座”
 
 	Mesh m_mesh;
 	Model m_model;
@@ -165,6 +165,7 @@ private:
 	DeletionQueue m_mainDeletionQueue;
 
 	// imgui stuff
+	VkDescriptorPool m_imguiPool;
 	ErisEditor* m_editor{ nullptr };
 	AllocatedImage m_viewportImage;
 	VkDescriptorSet m_viewportTextureSet{ VK_NULL_HANDLE };

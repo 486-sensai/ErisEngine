@@ -43,9 +43,13 @@ public:
     // 辅助函数：在物理世界创建一个盒子刚体
     JPH::BodyID createBox(glm::vec3 position, glm::vec3 halfExtent, bool isStatic);
 
+    void destroyBody(JPH::BodyID bodyID);
+
     // 获取物体的实时变换
     void getTransform(JPH::BodyID bodyID, glm::vec3& outPos, glm::vec3& outRot);
+    void setTransform(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation);
 
+    void resetBodyState(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation,glm::vec3 scale);
 
     JPH::BodyInterface& getBodyInterface() { return m_physicsSystem.GetBodyInterface(); }
 
@@ -64,4 +68,6 @@ private:
     BPLayerInterfaceImpl* m_bpInterface = nullptr;
     ObjectLayerPairFilterImpl* m_objLayerFilter = nullptr;
     ObjectVsBPLayerFilterImpl* m_objVsBPFilter = nullptr;
+
+
 };

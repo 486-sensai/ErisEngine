@@ -106,3 +106,20 @@ struct Model {
         }
     }
 };
+
+struct GPUSceneData {
+    glm::vec4 fogColor;
+    glm::vec4 ambientColor;
+    glm::vec4 sunlightDir;
+    glm::vec4 sunlightColor;
+};
+
+struct GPUPointLight {
+    glm::vec4 position;
+    glm::vec4 color;
+};
+
+struct GPULightData {
+    GPUPointLight pointLights[8];
+    int lightCount;                 // 当前实际开启的灯光数
+};

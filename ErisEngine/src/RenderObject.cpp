@@ -20,6 +20,13 @@ glm::mat4 RenderObject::getTransformMatrix() {
     return m;
 }
 
+void RenderObject::resetToInitialState()
+{
+    m_location = m_initialLocation;
+    m_rotation = m_initialRotation;
+    m_scale = m_initialScale;
+}
+
 void RenderObject::getWorldBounds(glm::vec3& outMin, glm::vec3& outMax)
 {
     if (!m_pModel) return;

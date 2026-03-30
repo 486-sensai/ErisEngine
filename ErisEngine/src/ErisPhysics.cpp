@@ -119,6 +119,19 @@ JPH::BodyID ErisPhysics::createBox(glm::vec3 position, glm::vec3 halfExtent, boo
     return body->GetID();
 }
 
+void ErisPhysics::destroyBody(JPH::BodyID bodyID)
+{
+    if (bodyID.IsInvalid()) return;
+
+    JPH::BodyInterface& body_interface = m_physicsSystem.GetBodyInterface();
+
+    // 1. 先从物理系统中移除（停止模拟）
+    body_interface.RemoveBody(bodyID);
+
+    // 2. 彻底销毁刚体释放内存
+    body_interface.DestroyBody(bodyID);
+}
+
 void ErisPhysics::update(float deltaTime) {
     // Jolt 推荐使用固定的时间步进 (例如 60Hz)
     float step = std::min(deltaTime, 1.0f / 30.0f);
@@ -135,6 +148,43 @@ void ErisPhysics::getTransform(JPH::BodyID bodyID, glm::vec3& outPos, glm::vec3&
     // 将四元数转为欧拉角 (GLM)
     glm::quat gRot(rot.GetW(), rot.GetX(), rot.GetY(), rot.GetZ());
     outRot = glm::degrees(glm::eulerAngles(gRot));
+}
+
+void ErisPhysics::setTransform(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation)
+{
+    JPH::BodyInterface& body_interface = m_physicsSystem.GetBodyInterface();
+
+    // 1. 将 GLM 欧拉角转回 Jolt 四元数
+    glm::quat q(glm::radians(rotation));
+    JPH::Quat jph_rot(q.x, q.y, q.z, q.w);
+
+    // 2. 瞬间移动物理身体 (Teleport)
+    // EActivation::Activate 确保移动后物体是“醒着的”，否则它可能会浮在空中不掉下来
+    body_interface.SetPositionAndRotation(bodyID,
+        JPH::RVec3(position.x, position.y, position.z),
+        jph_rot,
+        JPH::EActivation::Activate);
+}
+
+void ErisPhysics::resetBodyState(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation,glm::vec3 scale)
+{
+    if (bodyID.IsInvalid()) return;
+
+    JPH::BodyInterface& body_interface = m_physicsSystem.GetBodyInterface();
+
+    // 1. 停止所有运动：清空线性速度和角速度
+    // 如果不重置速度，物体在重置位置后会带着之前的惯性飞出去
+    body_interface.SetLinearVelocity(bodyID, JPH::Vec3::sZero());
+    body_interface.SetAngularVelocity(bodyID, JPH::Vec3::sZero());
+
+    // 2. 转换坐标和旋转
+    JPH::RVec3 jph_pos(position.x, position.y, position.z);
+    glm::quat q = glm::quat(glm::radians(rotation));
+    JPH::Quat jph_rot(q.x, q.y, q.z, q.w);
+
+    // 3. 瞬间移动并强行激活 (Activate)
+    // 激活是为了确保重置后的物体立即受重力影响，而不是停在半空
+    body_interface.SetPositionAndRotation(bodyID, jph_pos, jph_rot, JPH::EActivation::Activate);
 }
 
 void ErisPhysics::cleanup() {
