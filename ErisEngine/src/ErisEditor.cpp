@@ -102,6 +102,7 @@ void ErisEditor::render_editor(ErisEngine* engine)
     show_outliner(engine);    // 显示左侧物体大纲
     show_details(engine);     // 显示右侧属性面板
     show_content_browser(engine);   // 显示底部资源浏览器（如果有）
+    show_environment_settings(engine);
 
 
     ImGui::End(); // 结束 DockSpace
@@ -164,6 +165,7 @@ void ErisEditor::show_main_dockspace(ErisEngine* engine)
         ImGui::DockBuilderDockWindow("Viewport", dock_id_main);
         ImGui::DockBuilderDockWindow("Outliner", dock_id_left);
         ImGui::DockBuilderDockWindow("Details", dock_id_right);
+        ImGui::DockBuilderDockWindow("Environment", dock_id_right);
         ImGui::DockBuilderDockWindow("Content Browser", dock_id_bottom);
 
         // 4. 完成构建
@@ -478,6 +480,49 @@ void ErisEditor::show_content_browser(ErisEngine* engine)
             }
         }
         ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
+void ErisEditor::show_environment_settings(ErisEngine* engine)
+{
+    ImGui::Begin("Environment");
+
+    if (ImGui::CollapsingHeader("Atmosphere", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::ColorEdit4("Ambient Color", &engine->m_sceneData.ambientColor.x);
+        ImGui::ColorEdit4("Fog Color", &engine->m_sceneData.fogColor.x);
+    }
+
+    if (ImGui::CollapsingHeader("Sunlight", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // 拖拽调整太阳方向
+        ImGui::DragFloat4("Sun Direction", &engine->m_sceneData.sunlightDir.x, 0.01f, -1.0f, 1.0f);
+        ImGui::ColorEdit4("Sun Color", &engine->m_sceneData.sunlightColor.x);
+    }
+
+    if (ImGui::CollapsingHeader("Point Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("Active Lights: %d / 8", engine->m_sceneData.lightCount);
+
+        if (ImGui::Button("Add Point Light") && engine->m_sceneData.lightCount < 8) {
+            int i = engine->m_sceneData.lightCount;
+            // 在相机位置生成一个灯
+            engine->m_sceneData.pointLights[i].position = glm::vec4(engine->m_camera.m_position, 10.0f); // w = range
+            engine->m_sceneData.pointLights[i].color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); // w = intensity
+            engine->m_sceneData.lightCount++;
+        }
+
+        // 遍历调节已有的点光源
+        for (int i = 0; i < engine->m_sceneData.lightCount; i++) {
+            ImGui::PushID(i);
+            if (ImGui::TreeNode(("Light " + std::to_string(i)).c_str())) {
+                ImGui::DragFloat3("Position", &engine->m_sceneData.pointLights[i].position.x, 0.1f);
+                ImGui::DragFloat("Range", &engine->m_sceneData.pointLights[i].position.w, 0.1f, 0.0f, 100.0f);
+                ImGui::ColorEdit3("Color", &engine->m_sceneData.pointLights[i].color.x);
+                ImGui::DragFloat("Intensity", &engine->m_sceneData.pointLights[i].color.w, 0.1f, 0.0f, 100.0f);
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+        }
     }
 
     ImGui::End();

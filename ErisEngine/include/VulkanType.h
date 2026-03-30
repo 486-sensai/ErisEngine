@@ -107,19 +107,20 @@ struct Model {
     }
 };
 
-struct GPUSceneData {
-    glm::vec4 fogColor;
-    glm::vec4 ambientColor;
-    glm::vec4 sunlightDir;
-    glm::vec4 sunlightColor;
-};
-
 struct GPUPointLight {
     glm::vec4 position;
     glm::vec4 color;
 };
 
-struct GPULightData {
+// 我们需要考虑 Vulkan 的内存对齐（std140 布局）。在 UBO 中，数组和结构体必须对齐到 16 字节
+struct GPUSceneData {
+    glm::vec4 fogColor;
+    glm::vec4 ambientColor;
+    glm::vec4 sunlightDir;
+    glm::vec4 sunlightColor;
+
     GPUPointLight pointLights[8];
     int lightCount;                 // 当前实际开启的灯光数
+    float padding[3];               // 填充字节，保证结构体总大小是16的倍数
 };
+

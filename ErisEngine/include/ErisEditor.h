@@ -47,6 +47,7 @@ private:
     void show_details(ErisEngine* engine);
     void show_outliner(ErisEngine* engine);
     void show_content_browser(ErisEngine* engine);
+    void show_environment_settings(ErisEngine* engine);
 
     void set_theme(); // UE5 ÅäÉ«
 };

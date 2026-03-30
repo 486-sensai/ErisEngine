@@ -63,7 +63,9 @@ int ErisEngine::Eris_init()
 	initSyncStructures();
 	initCommands();
 	initDescriptors();
+	initDescriptorPool();
 	initPipelines();
+	createSceneBuffers();
 
 	m_activeWorld = new ErisWorld();
 	m_activeWorld->getPhysics().createBox(
@@ -76,6 +78,7 @@ int ErisEngine::Eris_init()
 	m_editor->init(this);
 	initViewportResources();
 	initDefaultResources();
+	initSceneData();
 
 	if (!loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
 		throw std::runtime_error("failed to load model!");
@@ -309,6 +312,39 @@ void ErisEngine::createFramebuffers()
 	}
 }
 
+void ErisEngine::createSceneBuffers()
+{
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		// 1. 创建显存中的缓冲区 (CPU_TO_GPU 模式方便每帧更新)
+		m_frames[i].sceneBuffer = createBuffer(sizeof(GPUSceneData),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+		// 2. 分配 Set 0 (全局描述符)
+		VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		allocInfo.descriptorPool = m_descriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &m_globalSetLayout;
+		vkAllocateDescriptorSets(m_device, &allocInfo, &m_frames[i].sceneDescriptorSet);
+
+		// 3. 将 Buffer 写入（插进）描述符
+		VkDescriptorBufferInfo binfo = {};
+		binfo.buffer = m_frames[i].sceneBuffer.buffer;
+		binfo.offset = 0;
+		binfo.range = sizeof(GPUSceneData);
+
+		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		write.dstSet = m_frames[i].sceneDescriptorSet;
+		write.dstBinding = 0;
+		write.descriptorCount = 1;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		write.pBufferInfo = &binfo;
+
+		vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+	}
+
+
+}
+
 VkImageView ErisEngine::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels)
 {
 	VkImageViewCreateInfo viewInfo{};
@@ -353,6 +389,8 @@ void ErisEngine::initPipelines()
 		throw std::runtime_error("failed to load shaders!");
 	}
 
+	std::array<VkDescriptorSetLayout, 2> layouts = { m_globalSetLayout,m_singleTextureLayout };
+
 	// 管线布局（目前为空，以后放 MVP 矩阵）
 	VkPushConstantRange pushConstantRange;
 	pushConstantRange.offset = 0;
@@ -361,8 +399,8 @@ void ErisEngine::initPipelines()
 
 	VkPipelineLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	layoutInfo.setLayoutCount = 1;
-	layoutInfo.pSetLayouts = &m_singleTextureLayout;
+	layoutInfo.setLayoutCount = 2;
+	layoutInfo.pSetLayouts = layouts.data();
 	layoutInfo.pushConstantRangeCount = 1;
 	layoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -1224,7 +1262,26 @@ void ErisEngine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& func
 }
 
 void ErisEngine::initDescriptors() {
-	// 1. 创建 Layout (插座规格)
+	// ---------------------------------------------------------
+	// 1. 创建全局布局 (Set 0) - 用于 GPUSceneData
+	// ---------------------------------------------------------
+	VkDescriptorSetLayoutBinding sceneBind{};
+	sceneBind.binding = 0;
+	sceneBind.descriptorCount = 1;
+	sceneBind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	sceneBind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutCreateInfo globalLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	globalLayoutInfo.bindingCount = 1;
+	globalLayoutInfo.pBindings = &sceneBind;
+	if (vkCreateDescriptorSetLayout(m_device, &globalLayoutInfo, nullptr, &m_globalSetLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create global descriptor set layout!");
+	}
+
+	// ---------------------------------------------------------
+	// 2. 创建材质布局 (Set 1) - 用于贴图
+	// ---------------------------------------------------------
+
 	VkDescriptorSetLayoutBinding textureBind{};
 	textureBind.binding = 0;
 	textureBind.descriptorCount = 1;
@@ -1234,26 +1291,11 @@ void ErisEngine::initDescriptors() {
 	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	layoutInfo.bindingCount = 1;
 	layoutInfo.pBindings = &textureBind;
-
-	// 关键：确保赋值给 m_singleTextureLayout
 	if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_singleTextureLayout) != VK_SUCCESS) {
-		throw std::runtime_error("failed to create descriptor set layout!");
+		throw std::runtime_error("failed to create singletexture descriptor set layout!");
 	}
 
-	// 2. 创建 Pool (配电箱)
-	// 假设我们要支持 100 个材质贴图
-	std::vector<VkDescriptorPoolSize> sizes = {
-		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 }
-	};
-	VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-	poolInfo.maxSets = 100;
-	poolInfo.poolSizeCount = (uint32_t)sizes.size();
-	poolInfo.pPoolSizes = sizes.data();
 
-	// 关键：确保赋值给 m_descriptorPool
-	if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
-		throw std::runtime_error("failed to create descriptor pool!");
-	}
 
 	// 3. 创建采样器 (Sampler)
 	VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
@@ -1263,11 +1305,34 @@ void ErisEngine::initDescriptors() {
 	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler);
 
+
 	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroySampler(m_device, m_sampler, nullptr);
-		vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_globalSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_singleTextureLayout, nullptr);
+		});
+}
+
+void ErisEngine::initDescriptorPool()
+{
+	std::vector<VkDescriptorPoolSize>sizes = {
+		{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,100},			// 支持 100 个全局数据块
+		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,500}		// 支持 500 张材质贴图
+	};
+
+	VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;						// 允许单独释放
+	poolInfo.maxSets = 600;																	// 总集数
+	poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
+	poolInfo.pPoolSizes = sizes.data();
+
+	if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor pool!");
+	}
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
 		});
 }
 
@@ -1327,10 +1392,8 @@ void ErisEngine::drawFrame()
 
 	handleInput(deltaTime);
 
-
 	FrameData& frame = getCurrentFrame();
 	vkWaitForFences(m_device, 1, &frame.m_renderFence, VK_TRUE, UINT64_MAX);
-	// vkResetFences(m_device, 1, &frame.m_renderFence);
 
 	VkCommandBuffer cmd = frame.m_mainCommandBuffer;
 
@@ -1347,6 +1410,13 @@ void ErisEngine::drawFrame()
 	vkResetCommandPool(m_device, frame.m_commandPool, 0);
 
 	m_editor->render_editor(this);
+
+
+	// 2. 将数据写入本帧的 UBO 内存
+	void* data;
+	vmaMapMemory(m_allocator, frame.sceneBuffer.allocation, &data);
+	memcpy(data, &m_sceneData, sizeof(GPUSceneData));
+	vmaUnmapMemory(m_allocator, frame.sceneBuffer.allocation);
 
 	// 录制简单的渲染指令
 	VkCommandBufferBeginInfo beginInfo{};
@@ -1388,35 +1458,7 @@ void ErisEngine::drawFrame()
 		m_scissor.extent = m_swapchainExtent;
 		vkCmdSetScissor(frame.m_mainCommandBuffer, 0, 1, &m_scissor);
 
-		/*float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
-		glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
-		glm::mat4 view = m_camera.getViewMatrix();
-		glm::mat4 model = glm::rotate(glm::mat4(1.0f), (float)glfwGetTime() * glm::radians(45.0f), glm::vec3(0, 1, 0));
-		glm::mat4 final_matrix = projection * view * model;
-		vkCmdPushConstants(frame.m_mainCommandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &final_matrix);
-	
-
-		for (auto& mesh : m_model.meshes) {
-			if (mesh.vertexBuffer.buffer == VK_NULL_HANDLE) continue;
-
-			VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
-				? mesh.material->textureSet : m_defaultTextureSet;
-
-			// 绑定描述符集 (Set 0)
-			// 注意：m_pipelineLayout 必须是那个包含了 m_singleTextureLayout 的布局
-			vkCmdBindDescriptorSets(frame.m_mainCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				m_pipelineLayout, 0, 1, &set_to_bind, 0, nullptr);
-
-			// 绑定顶点和索引
-			VkBuffer vBuffers[] = { mesh.vertexBuffer.buffer };
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindVertexBuffers(frame.m_mainCommandBuffer, 0, 1, vBuffers, offsets);
-			vkCmdBindIndexBuffer(frame.m_mainCommandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-			// 绘制
-			vkCmdDrawIndexed(frame.m_mainCommandBuffer, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
-		}
-		*/
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 
 		if (m_activeWorld) {
 			drawWorld(frame.m_mainCommandBuffer, *m_activeWorld);
@@ -2025,6 +2067,15 @@ void ErisEngine::initDefaultResources() {
 		});
 }
 
+void ErisEngine::initSceneData()
+{
+	m_sceneData.fogColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+	m_sceneData.ambientColor = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
+	m_sceneData.sunlightDir = glm::vec4(0.5f, 1.0f, 0.3f, 1.0f);
+	m_sceneData.sunlightColor = glm::vec4(1.0f, 0.9f, 0.8f, 1.0f);
+	m_sceneData.lightCount = 0; // 初始没有点光源
+}
+
 
 
 // ---------------------------World Functions---------------------------------
@@ -2053,20 +2104,24 @@ Model* ErisEngine::getOrLoadModel(const std::string& path) {
 }
 
 void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
+
+	FrameData& frame = getCurrentFrame();
+
 	// 1. 获取通用的 View 和 Projection（一帧只需计算一次）
 	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
 	glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
 	glm::mat4 view = m_camera.getViewMatrix();
+	
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		m_pipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 
 	// 2. 遍历世界里所有的物体
 	for (auto& objPtr : world.getObjects()) {
 		RenderObject& obj = *objPtr;
-
 		if (!obj.m_pModel) continue;
 
-		// --- 这里就是你原本计算 final_matrix 的地方，但现在是动态的 ---
 		glm::mat4 modelMatrix = obj.getTransformMatrix();
-
 		MeshPushConstants constants;
 		constants.render_matrix = projection * view * modelMatrix;
 		constants.model_matrix = modelMatrix;
@@ -2074,7 +2129,8 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 		// 推送当前物体的矩阵
 		vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
 
-		// --- 这里是你原本遍历 mesh 的循环 ---
+
+		// --- 这里是原本遍历 mesh 的循环 ---
 		for (auto& mesh : obj.m_pModel->meshes) {
 			if (mesh.vertexBuffer.buffer == VK_NULL_HANDLE) continue;
 
@@ -2082,17 +2138,18 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 			VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
 				? mesh.material->textureSet : m_defaultTextureSet;
 
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				m_pipelineLayout, 0, 1, &set_to_bind, 0, nullptr);
+
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+				m_pipelineLayout, 1, 1, &set_to_bind, 0, nullptr);
 
 			// 绑定顶点和索引
 			VkBuffer vBuffers[] = { mesh.vertexBuffer.buffer };
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindVertexBuffers(cmd, 0, 1, vBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
 			// 绘制
 			vkCmdDrawIndexed(cmd, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+
 		}
 	}
 }

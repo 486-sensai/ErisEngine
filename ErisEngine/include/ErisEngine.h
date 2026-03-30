@@ -47,7 +47,7 @@ struct FrameData {
 	VkSemaphore m_renderSemaphore;
 	VkFence m_renderFence;
 
-	AllocatedBuffer sceneDataBuffer;
+	AllocatedBuffer sceneBuffer;
 	VkDescriptorSet sceneDescriptorSet;
 };
 
@@ -161,6 +161,8 @@ private:
 	AllocatedImage m_defaultTexture;    // 1x1 白图
 	VkDescriptorSet m_defaultTextureSet; // 1x1 白图对应的描述符集
 
+	GPUSceneData m_sceneData;
+
 	// queue deletion
 	DeletionQueue m_mainDeletionQueue;
 
@@ -215,24 +217,18 @@ public:
 	void pickPhysicalDevice();
 	void createInstance();
 
-	VkCommandBuffer beginSingleTimeCommands();
-
-	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
-
 	// 检查扩展是否支持交换链
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
 
-	bool loadShaderModule(const char* filePath, VkShaderModule* outShaderModule);
-
 
 	void createSwapchain();
 	void recreateSwapchain();
 	void createImageViews();
 	void createFramebuffers();
+	void createSceneBuffers();
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
 	
 	void createDepthBuffer();
@@ -247,6 +243,7 @@ public:
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 	void initDescriptors();
+	void initDescriptorPool();
 	VkDescriptorSet createDescriptorSet(AllocatedImage& img);
 	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
@@ -266,8 +263,11 @@ public:
 
 	AllocatedImage loadImageFromFile(const char* file);
 
+	bool loadShaderModule(const char* filePath, VkShaderModule* outShaderModule);
+
 	void initDefaultResources();
 
+	void initSceneData();
 
 	// ----------------------Handle External Events------------------------
 	void handleInput(float deltaTime);
