@@ -2,3 +2,15 @@
 # 此 .gitignore 文件已由 Microsoft(R) Visual Studio 自动创建。
 ################################################################################
 
+/.vs
+/ErisEngine/out/build/x64-Debug
+/ErisEngine/third_party
+/ErisEngine/x64/Debug
+/packages
+/x64/Debug
+/ErisEngine.sln
+/ErisEngine/packages.config
+/ErisEngine/imgui.ini
+/ErisEngine/assets/rungholt
+/ErisEngine/assets/roadBike.obj
+/ErisEngine/assets/roadBike.mtl
