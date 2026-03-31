@@ -12,6 +12,8 @@ struct GPUPointLight {
 };
 
 layout(set = 0, binding = 0) uniform SceneData {
+    mat4 view;
+    mat4 proj;
     vec4 fogColor;
     vec4 ambientColor;
     vec4 sunlightDir;

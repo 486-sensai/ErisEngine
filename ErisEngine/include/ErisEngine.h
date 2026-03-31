@@ -153,13 +153,24 @@ private:
 	VkDescriptorPool m_descriptorPool;
 	VkSampler m_sampler;
 
-	VkDescriptorSetLayout m_globalSetLayout; // 全局数据的“插座”
+	VkDescriptorSetLayout m_globalSetLayout; 
 
 	Mesh m_mesh;
 	Model m_model;
 
 	AllocatedImage m_defaultTexture;    // 1x1 白图
 	VkDescriptorSet m_defaultTextureSet; // 1x1 白图对应的描述符集
+
+	AllocatedImage m_skyboxImage;
+	VkDescriptorSet m_skyboxDescriptorSet;
+	VkDescriptorSetLayout m_skyboxDescriptorSetLayout;
+	VkPipeline m_skyboxPipeline;
+	VkPipelineLayout m_skyboxPipelineLayout;
+	VkSampler m_skyboxSampler;
+
+	Mesh m_skyboxMesh;
+
+	VkShaderModule skyVert, skyFrag;
 
 	GPUSceneData m_sceneData;
 
@@ -181,6 +192,8 @@ private:
 
 
 
+
+
 public:
 
 	// ----------------------vulkan rendering functions-------------------
@@ -192,6 +205,8 @@ public:
 	void initRenderPass();
 	void initUIRenderPass();
 	void initPipelines();
+	void initSkyboxPipeline();
+
 
 	bool checkValidationLayerSupport();
 	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
@@ -229,6 +244,8 @@ public:
 	void createImageViews();
 	void createFramebuffers();
 	void createSceneBuffers();
+	void initSkyboxDescriptor();
+	void initSkyboxMesh();
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
 	
 	void createDepthBuffer();
@@ -245,7 +262,7 @@ public:
 	void initDescriptors();
 	void initDescriptorPool();
 	VkDescriptorSet createDescriptorSet(AllocatedImage& img);
-	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,uint32_t layerCount);
 
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -265,9 +282,13 @@ public:
 
 	bool loadShaderModule(const char* filePath, VkShaderModule* outShaderModule);
 
+	AllocatedImage loadCubemap(const std::vector<std::string>& faces);
+
 	void initDefaultResources();
 
 	void initSceneData();
+
+
 
 	// ----------------------Handle External Events------------------------
 	void handleInput(float deltaTime);
@@ -282,4 +303,7 @@ public:
 	Model* getOrLoadModel(const std::string& path);
 	void drawWorld(VkCommandBuffer cmd, ErisWorld& world);
 	RenderObject* pickObject(float mouseX, float mouseY);
+
+
+
 };

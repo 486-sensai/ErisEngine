@@ -114,6 +114,8 @@ struct GPUPointLight {
 
 // 我们需要考虑 Vulkan 的内存对齐（std140 布局）。在 UBO 中，数组和结构体必须对齐到 16 字节
 struct GPUSceneData {
+    glm::mat4 view;
+    glm::mat4 proj;
     glm::vec4 fogColor;
     glm::vec4 ambientColor;
     glm::vec4 sunlightDir;

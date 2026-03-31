@@ -7,9 +7,11 @@
 #include "RenderObject.h" 
 #include "ErisPhysics.h"
 
+class ErisEngine;
 
 class ErisWorld {
 public:
+    friend class ErisEngine;
     ErisWorld();
     ~ErisWorld();
 
@@ -26,9 +28,16 @@ public:
     void update(float deltaTime);
     ErisPhysics& getPhysics() { return m_physics; }
 
+
+    //-----------------------LearnOpenGL Skybox----------------------------
+
+    void createDefaultSkybox();
+
 private:
     // 使用 unique_ptr 管理物体，确保内存安全且在 vector 扩容时地址稳定
     std::vector<std::unique_ptr<RenderObject>> m_objects;
 
     ErisPhysics m_physics;
+
+    std::vector<std::string> skyboxFaces;
 };

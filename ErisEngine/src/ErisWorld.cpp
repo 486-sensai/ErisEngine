@@ -12,6 +12,9 @@ ErisWorld::~ErisWorld()
             m_physics.destroyBody(obj->m_bodyID);
         }
     }
+    
+    createDefaultSkybox();
+
     m_physics.cleanup();
 }
 
@@ -67,4 +70,19 @@ void ErisWorld::update(float deltaTime) {
             obj->m_rotation = newRot;
         }
     }
+}
+
+void ErisWorld::createDefaultSkybox()
+{
+    // 使用的是 LearnOpenGL Skybox 所使用的skybox贴图
+
+    skyboxFaces = {
+        "assets/skybox/right.jpg",
+        "assets/skybox/left.jpg",
+        "assets/skybox/top.jpg",
+        "assets/skybox/bottom.jpg",
+        "assets/skybox/front.jpg",
+        "assets/skybox/back.jpg"
+    };
+    
 }

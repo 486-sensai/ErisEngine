@@ -65,7 +65,9 @@ int ErisEngine::Eris_init()
 	initDescriptors();
 	initDescriptorPool();
 	initPipelines();
+	initSkyboxPipeline();
 	createSceneBuffers();
+	initSkyboxMesh();
 
 	m_activeWorld = new ErisWorld();
 	m_activeWorld->getPhysics().createBox(
@@ -74,10 +76,16 @@ int ErisEngine::Eris_init()
 		true
 	);
 
+	m_activeWorld->createDefaultSkybox();
+	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
+	initSkyboxDescriptor();
+
 	m_editor = new ErisEditor();
 	m_editor->init(this);
 	initViewportResources();
+	// 如果没有加载出材质则用1x1白色代替
 	initDefaultResources();
+	// 初始化世界光
 	initSceneData();
 
 	if (!loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
@@ -85,6 +93,7 @@ int ErisEngine::Eris_init()
 	}
 	m_model.uploadModel(m_allocator, this);
 	
+
 	// debug用 测试对象
 	{
 		// 生成两辆车，放在不同位置
@@ -186,6 +195,96 @@ bool ErisEngine::loadShaderModule(const char* filePath, VkShaderModule* outShade
 	createInfo.pCode = buffer.data();
 
 	return vkCreateShaderModule(m_device, &createInfo, nullptr, outShaderModule) == VK_SUCCESS;
+}
+
+AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
+{
+	if (faces.size() != 6) {
+		throw std::runtime_error("Cubemap must have exactly 6 faces!");
+	}
+
+	int width, height, channels;
+	std::vector<stbi_uc*> pixels(6);
+	
+	// 1. 加载 6 张图
+	for (int i = 0; i < 6; i++) {
+		pixels[i] = stbi_load(faces[i].c_str(), &width, &height, &channels, STBI_rgb_alpha);
+		if (!pixels[i])throw std::runtime_error("failed to load cubemap face!");
+	}
+
+	VkDeviceSize layerSize = width * height * 4;
+	VkDeviceSize totalSize = layerSize * 6;
+
+	VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB; 
+	VkExtent3D imageExtent;
+	imageExtent.width = static_cast<uint32_t>(width);
+	imageExtent.height = static_cast<uint32_t>(height);
+	imageExtent.depth = 1;
+
+	// 2. 创建 Staging Buffer
+	AllocatedBuffer stagingBuffer = createBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	void* data;
+	vmaMapMemory(m_allocator, stagingBuffer.allocation, &data);
+	for (int i = 0; i < 6; i++) {
+		memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
+		stbi_image_free(pixels[i]);
+	}
+	vmaUnmapMemory(m_allocator, stagingBuffer.allocation);
+
+	// 3. 创建 GPU Image (关键：arrayLayers = 6, flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
+	AllocatedImage newImage;
+	VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+	imgInfo.extent = imageExtent;
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 6; // 6层
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT; // 标记为立方体贴图
+
+
+	VmaAllocationCreateInfo vmaAllocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &vmaAllocInfo, &newImage.image, &newImage.allocation, nullptr);
+
+	
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,6);
+
+		std::vector<VkBufferImageCopy>regions{};
+		 
+		for (uint32_t i = 0; i < 6; i++) {
+			VkBufferImageCopy region{};
+			region.bufferOffset = layerSize * i;
+			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			region.imageSubresource.mipLevel = 0;
+			region.imageSubresource.baseArrayLayer = i;
+			region.imageSubresource.layerCount = 1;
+			region.imageExtent = imageExtent;
+			regions.push_back(region);
+		}
+
+		vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions.data());
+
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6);
+		});
+
+
+	// 5. 创建特殊的 ImageView (viewType = VK_IMAGE_VIEW_TYPE_CUBE)
+	VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	viewInfo.image = newImage.image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+	viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+	viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+	vkCreateImageView(m_device, &viewInfo, nullptr, &newImage.imageView);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, newImage.imageView, nullptr);
+		vmaDestroyImage(m_allocator, newImage.image, newImage.allocation);
+		});
+
+	return newImage;
 }
 
 void ErisEngine::createSwapchain()
@@ -345,6 +444,57 @@ void ErisEngine::createSceneBuffers()
 
 }
 
+void ErisEngine::initSkyboxDescriptor()
+{
+	VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &m_skyboxDescriptorSetLayout; // 关键：使用天空盒布局
+
+	vkAllocateDescriptorSets(m_device, &allocInfo, &m_skyboxDescriptorSet);
+
+	VkDescriptorImageInfo imageInfo{};
+	imageInfo.sampler = m_skyboxSampler;
+	imageInfo.imageView = m_skyboxImage.imageView;
+	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	write.dstSet = m_skyboxDescriptorSet;
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.pImageInfo = &imageInfo;
+
+	vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
+void ErisEngine::initSkyboxMesh()
+{
+	std::vector<Vertex> skyboxVertices = {
+		{{-1.0f,  1.0f, -1.0f}, {}, {}, {}},
+		{{ 1.0f,  1.0f, -1.0f}, {}, {}, {}},
+		{{ 1.0f, -1.0f, -1.0f}, {}, {}, {}},
+		{{-1.0f, -1.0f, -1.0f}, {}, {}, {}},
+		{{-1.0f,  1.0f,  1.0f}, {}, {}, {}},
+		{{ 1.0f,  1.0f,  1.0f}, {}, {}, {}},
+		{{ 1.0f, -1.0f,  1.0f}, {}, {}, {}},
+		{{-1.0f, -1.0f,  1.0f}, {}, {}, {}} 
+	};
+
+	std::vector<uint32_t> skyboxIndices = {
+		0, 1, 2, 2, 3, 0,
+		4, 5, 6, 6, 7, 4,
+		0, 4, 7, 7, 3, 0,
+		1, 5, 6, 6, 2, 1,
+		0, 1, 5, 5, 4, 0,
+		3, 2, 6, 6, 7, 3
+	};
+
+	m_skyboxMesh.vertices = skyboxVertices;
+	m_skyboxMesh.indices = skyboxIndices;
+	m_skyboxMesh.uploadMesh(m_allocator, this);
+}
+
 VkImageView ErisEngine::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels)
 {
 	VkImageViewCreateInfo viewInfo{};
@@ -407,7 +557,6 @@ void ErisEngine::initPipelines()
 	if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create pipeline layout!");
 	}
-
 
 	PipelineBuilder builder;
 	// 1. 添加着色器阶段
@@ -477,6 +626,7 @@ void ErisEngine::initPipelines()
 	builder.m_pipelineLayout = m_pipelineLayout;
 	m_pipeline = builder.buildPipeline(m_device, m_renderPass);
 
+	
 	vkDestroyShaderModule(m_device, vertModule, nullptr);
 	vkDestroyShaderModule(m_device, fragModule, nullptr);
 
@@ -486,6 +636,80 @@ void ErisEngine::initPipelines()
 		});
 }
 
+void ErisEngine::initSkyboxPipeline()
+{
+	VkShaderModule skyVert, skyFrag;
+	if (!loadShaderModule("shaders/sky_vert.spv", &skyVert) || !loadShaderModule("shaders/sky_frag.spv", &skyFrag)) {
+		throw std::runtime_error("failed to load skybox shaders!");
+	}
+
+	std::array<VkDescriptorSetLayout, 2> skyboxLayouts = { m_globalSetLayout, m_skyboxDescriptorSetLayout };
+	VkPipelineLayoutCreateInfo skyLayoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	skyLayoutInfo.setLayoutCount = 2;
+	skyLayoutInfo.pSetLayouts = skyboxLayouts.data();
+	// 天空盒通常不需要 PushConstants，或者只需要一个缩放系数
+	skyLayoutInfo.pushConstantRangeCount = 0;
+
+	if (vkCreatePipelineLayout(m_device, &skyLayoutInfo, nullptr, &m_skyboxPipelineLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create skybox pipeline layout!");
+	}
+
+	PipelineBuilder skyBuilder;
+
+	VkPipelineShaderStageCreateInfo vertStage = {};
+	vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertStage.module = skyVert;
+	vertStage.pName = "main";
+
+	VkPipelineShaderStageCreateInfo fragStage = {};
+	fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragStage.module = skyFrag;
+	fragStage.pName = "main";
+
+	skyBuilder.m_shaderStages.push_back(vertStage);
+	skyBuilder.m_shaderStages.push_back(fragStage);
+
+	skyBuilder.m_vertexBindings.push_back(Vertex::getBindingDescription());
+	skyBuilder.m_vertexAttributes = Vertex::getAttributeDescriptions();
+	skyBuilder.m_vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	skyBuilder.m_inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	skyBuilder.m_inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	skyBuilder.m_inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	skyBuilder.m_viewport = { 0.0f, 0.0f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f };
+	skyBuilder.m_scissor = { {0, 0}, m_swapchainExtent };
+
+	skyBuilder.m_rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	skyBuilder.m_rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	skyBuilder.m_rasterizer.cullMode = VK_CULL_MODE_NONE;
+	//skyBuilder.m_rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	skyBuilder.m_rasterizer.lineWidth = 1.0f;
+
+	skyBuilder.m_multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	skyBuilder.m_multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	skyBuilder.m_colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	skyBuilder.m_colorBlendAttachment.blendEnable = VK_FALSE;
+
+	skyBuilder.m_depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	skyBuilder.m_depthStencil.depthTestEnable = VK_TRUE;
+	skyBuilder.m_depthStencil.depthWriteEnable = VK_FALSE; // 关键：天空盒不写入深度，不遮挡后续UI
+	skyBuilder.m_depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+	skyBuilder.m_pipelineLayout = m_skyboxPipelineLayout;
+
+	m_skyboxPipeline = skyBuilder.buildPipeline(m_device, m_renderPass);
+	vkDestroyShaderModule(m_device, skyVert, nullptr);
+	vkDestroyShaderModule(m_device, skyFrag, nullptr);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipelineLayout(m_device, m_skyboxPipelineLayout, nullptr);
+		vkDestroyPipeline(m_device, m_skyboxPipeline, nullptr);
+		});
+}
 
 FrameData& ErisEngine::getCurrentFrame()
 {
@@ -1161,40 +1385,6 @@ void ErisEngine::createInstance()
 	}
 }
 
-//VkCommandBuffer ErisEngine::beginSingleTimeCommands(std::function<void(VkCommandBuffer cmd)>&& function) {
-//	VkCommandBufferAllocateInfo allocInfo{};
-//	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-//	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-//	allocInfo.commandPool = &m_frames[0].m_commandPool;
-//	allocInfo.commandBufferCount = 1;
-//
-//	VkCommandBuffer commandBuffer;
-//	vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
-//
-//	VkCommandBufferBeginInfo beginInfo{};
-//	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;;
-//	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-//
-//	vkBeginCommandBuffer(commandBuffer, &beginInfo);
-//
-//	function(commandBuffer);
-//
-//	return commandBuffer;
-//}
-//void ErisEngine::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-//	vkEndCommandBuffer(commandBuffer);
-//
-//	VkSubmitInfo submitInfo{};
-//	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-//	submitInfo.commandBufferCount = 1;
-//	submitInfo.pCommandBuffers = &commandBuffer;
-//
-//	vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-//	vkQueueWaitIdle(m_graphicsQueue);
-//
-//	vkFreeCommandBuffers(m_device, m_frames[0].m_commandPool, 1, &commandBuffer);
-//}
-
 
 AllocatedBuffer ErisEngine::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) 
 {
@@ -1279,7 +1469,7 @@ void ErisEngine::initDescriptors() {
 	}
 
 	// ---------------------------------------------------------
-	// 2. 创建材质布局 (Set 1) - 用于贴图
+	// 2.1 创建材质布局 (Set 1) - 用于贴图
 	// ---------------------------------------------------------
 
 	VkDescriptorSetLayoutBinding textureBind{};
@@ -1295,7 +1485,22 @@ void ErisEngine::initDescriptors() {
 		throw std::runtime_error("failed to create singletexture descriptor set layout!");
 	}
 
+	// ---------------------------------------------------------
+	// 2.2 创建天空盒布局 (Set 1) - 用于贴图
+	// ---------------------------------------------------------
 
+	VkDescriptorSetLayoutBinding skyboxBind{};
+	skyboxBind.binding = 0;
+	skyboxBind.descriptorCount = 1;
+	skyboxBind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	skyboxBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutCreateInfo skyInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	skyInfo.bindingCount = 1;
+	skyInfo.pBindings = &skyboxBind; 
+	if (vkCreateDescriptorSetLayout(m_device, &skyInfo, nullptr, &m_skyboxDescriptorSetLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create skybox descriptor set layout!");
+	}
 
 	// 3. 创建采样器 (Sampler)
 	VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
@@ -1303,14 +1508,28 @@ void ErisEngine::initDescriptors() {
 	samplerInfo.minFilter = VK_FILTER_LINEAR;
 	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler);
+	if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create original sampler!");
+	};
 
+	VkSamplerCreateInfo skySamplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	skySamplerInfo.magFilter = VK_FILTER_LINEAR;
+	skySamplerInfo.minFilter = VK_FILTER_LINEAR;
+	// 关键：防止边缘接缝
+	skySamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	skySamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	skySamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	if (vkCreateSampler(m_device, &skySamplerInfo, nullptr, &m_skyboxSampler) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create skybox sampler!");
+	}
 
 	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroySampler(m_device, m_sampler, nullptr);
+		vkDestroySampler(m_device, m_skyboxSampler, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_globalSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_singleTextureLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_skyboxDescriptorSetLayout, nullptr);
 		});
 }
 
@@ -1410,7 +1629,9 @@ void ErisEngine::drawFrame()
 	vkResetCommandPool(m_device, frame.m_commandPool, 0);
 
 	m_editor->render_editor(this);
-
+	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
+	m_sceneData.view = m_camera.getViewMatrix();
+	m_sceneData.proj = m_camera.getProjectionMatrix(aspect);
 
 	// 2. 将数据写入本帧的 UBO 内存
 	void* data;
@@ -1433,7 +1654,7 @@ void ErisEngine::drawFrame()
 
 	transitionImageLayout(frame.m_mainCommandBuffer, m_viewportImage.image, m_swapchainImageFormat,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1);
 
 	VkRenderPassBeginInfo sceneRpInfo{};
 	sceneRpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1469,7 +1690,7 @@ void ErisEngine::drawFrame()
 
 	transitionImageLayout(frame.m_mainCommandBuffer, m_viewportImage.image, m_swapchainImageFormat,
 		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 
 	std::array<VkClearValue, 2> uiClearValues{};
 	uiClearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
@@ -1538,7 +1759,7 @@ void ErisEngine::drawFrame()
 	m_frameNumber++;
 }
 
-void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,uint32_t layerCount) {
 	VkImageMemoryBarrier barrier{};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.oldLayout = oldLayout;
@@ -1550,7 +1771,7 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = 1;
 	barrier.subresourceRange.baseArrayLayer = 0;
-	barrier.subresourceRange.layerCount = 1;
+	barrier.subresourceRange.layerCount = layerCount;
 
 	VkPipelineStageFlags sourceStage;
 	VkPipelineStageFlags destinationStage;
@@ -1688,7 +1909,7 @@ void ErisEngine::initViewportResources()
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
 			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
 		}); 
 
 	if (m_viewportTextureSet != VK_NULL_HANDLE) {
@@ -1830,6 +2051,8 @@ bool ErisEngine::loadModelFromFile(const std::string& filename, Model& outModel)
 		outModel.materials.push_back(engineMat);
 	}
 
+	outModel.minBound = glm::vec3(FLT_MAX);
+	outModel.maxBound = glm::vec3(-FLT_MAX);
 	// --- 第二步：加载所有网格 (Mesh) ---
 	for (unsigned int m = 0; m < scene->mNumMeshes; m++) {
 		aiMesh* aiMeshPtr = scene->mMeshes[m];
@@ -1840,8 +2063,6 @@ bool ErisEngine::loadModelFromFile(const std::string& filename, Model& outModel)
 		aiColor3D kd(1.0f, 1.0f, 1.0f);
 		aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, kd);
 
-		outModel.minBound = glm::vec3(FLT_MAX);
-		outModel.maxBound = glm::vec3(-FLT_MAX);
 
 		// 填充顶点
 		for (uint32_t i = 0; i < aiMeshPtr->mNumVertices; i++) {
@@ -1952,7 +2173,7 @@ AllocatedImage ErisEngine::loadImageFromFile(const char* file)
 	// 4. 将数据从 Buffer 拷贝到 Image (利用 immediateSubmit)
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		// A. 转换布局：Undefined -> Transfer Destination (准备接收数据)
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
 
 		// B. 执行拷贝
 		VkBufferImageCopy copyRegion{};
@@ -1968,7 +2189,7 @@ AllocatedImage ErisEngine::loadImageFromFile(const char* file)
 		vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
 		// C. 转换布局：Transfer Destination -> Shader Read Only (准备给 Shader 用)
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
 		});
 
 	// 5. 创建 Image View
@@ -2030,7 +2251,7 @@ void ErisEngine::initDefaultResources() {
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		// A. 转换布局为接收端
 		transitionImageLayout(cmd, m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
 
 		// B. 拷贝缓冲区到图像
 		VkBufferImageCopy copyRegion{};
@@ -2048,7 +2269,7 @@ void ErisEngine::initDefaultResources() {
 
 		// C. 转换为 Shader 可读布局
 		transitionImageLayout(cmd, m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 		});
 
 	// 5. 创建视图
@@ -2069,6 +2290,7 @@ void ErisEngine::initDefaultResources() {
 
 void ErisEngine::initSceneData()
 {
+	memset(&m_sceneData, 0, sizeof(GPUSceneData));
 	m_sceneData.fogColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
 	m_sceneData.ambientColor = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
 	m_sceneData.sunlightDir = glm::vec4(0.5f, 1.0f, 0.3f, 1.0f);
@@ -2106,7 +2328,7 @@ Model* ErisEngine::getOrLoadModel(const std::string& path) {
 void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 
 	FrameData& frame = getCurrentFrame();
-
+	
 	// 1. 获取通用的 View 和 Projection（一帧只需计算一次）
 	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
 	glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
@@ -2152,6 +2374,28 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 
 		}
 	}
+
+
+	// ---------------------------------------------------------
+	// --- 3. 绘制天空盒 (放在物体之后，利用深度测试) ---
+	// ---------------------------------------------------------
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipeline);
+
+	// 绑定天空盒贴图 (Set 1)
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipelineLayout, 
+		0, 1, &frame.sceneDescriptorSet, 0, nullptr);
+
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipelineLayout,
+		1, 1, &m_skyboxDescriptorSet, 0, nullptr);
+
+	// 绑定天空盒的顶点数据 (m_skyboxMesh 应该是你之前生成的立方体)
+	VkBuffer skyBuffers[] = { m_skyboxMesh.vertexBuffer.buffer };
+	VkDeviceSize skyOffsets[] = { 0 };
+	vkCmdBindVertexBuffers(cmd, 0, 1, skyBuffers, skyOffsets);
+	vkCmdBindIndexBuffer(cmd, m_skyboxMesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	// 绘制 36 个索引（立方体）
+	vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
 }
 
 RenderObject* ErisEngine::pickObject(float mouseX, float mouseY)
