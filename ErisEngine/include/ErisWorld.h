@@ -15,7 +15,6 @@ public:
     ErisWorld();
     ~ErisWorld();
 
-
     // 创建一个新物体并加入世界，返回其原始指针以便后续操作
     RenderObject* spawnObject(Model* model, const std::string& name);
 

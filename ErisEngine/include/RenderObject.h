@@ -23,6 +23,7 @@ public:
     glm::vec3 m_location{ 0.0f, 0.0f, 0.0f };
     glm::vec3 m_rotation{ 0.0f, 0.0f, 0.0f }; // Å·À­½Ç (¶È)
     glm::vec3 m_scale{ 1.0f, 1.0f, 1.0f };
+    glm::vec3 m_localCenter{ 0.0f,0.0f,0.0f };
 
     std::string m_name;
     Model* m_pModel{ nullptr };

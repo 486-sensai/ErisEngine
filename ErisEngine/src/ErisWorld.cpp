@@ -60,13 +60,17 @@ void ErisWorld::update(float deltaTime) {
     // 2. 将物理计算后的结果写回给 RenderObject
     for (auto& obj : m_objects) {
         if (obj->m_physicsEnabled) {
-            extern bool G_IsGizmoUsing;
-
             glm::vec3 newPos, newRot;
-            // 从 Jolt 拿回位置和旋转（欧拉角）
             m_physics.getTransform(obj->m_bodyID, newPos, newRot);
+
+            glm::mat4 rotationMat = glm::mat4(1.0f);
+            rotationMat = glm::rotate(rotationMat, glm::radians(newRot.z), { 0,0,1 });
+            rotationMat = glm::rotate(rotationMat, glm::radians(newRot.y), { 0,1,0 });
+            rotationMat = glm::rotate(rotationMat, glm::radians(newRot.x), { 1,0,0 });
             
-            obj->m_location = newPos;
+            glm::vec3 rotatedOffset = glm::vec3(rotationMat * glm::vec4(obj->m_localCenter, 1.0f));
+
+            obj->m_location = newPos-rotatedOffset;
             obj->m_rotation = newRot;
         }
     }

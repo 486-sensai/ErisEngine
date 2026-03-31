@@ -94,7 +94,8 @@ class ErisEngine {
 
 public:
 	ErisEngine()
-		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr),m_selectedObject(nullptr)
+		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr), m_selectedObject(nullptr),
+		m_framebufferResized(false), m_isMousePressed(false)
 	{}
 
 	int Eris_init();
@@ -105,14 +106,13 @@ public:
 
 private:
 	bool m_isInitialized;
+	bool m_isMousePressed; 
+	bool m_framebufferResized;
 	GLFWwindow* m_window;
 	ECamera m_camera;
 	VkViewport m_viewport;
 	VkRect2D m_scissor;
-
-	bool m_framebufferResized = false;
-	bool m_isMousePressed = false; // 是否按下右键旋转
-	double m_lastX, m_lastY;       // 记录上一帧鼠标位置
+	double m_lastX, m_lastY;
 
 	// vulkan core
 	VkInstance m_instance;
@@ -153,11 +153,6 @@ private:
 	VkDescriptorPool m_descriptorPool;
 	VkSampler m_sampler;
 
-	VkDescriptorSetLayout m_globalSetLayout; 
-
-	Mesh m_mesh;
-	Model m_model;
-
 	AllocatedImage m_defaultTexture;    // 1x1 白图
 	VkDescriptorSet m_defaultTextureSet; // 1x1 白图对应的描述符集
 
@@ -167,12 +162,7 @@ private:
 	VkPipeline m_skyboxPipeline;
 	VkPipelineLayout m_skyboxPipelineLayout;
 	VkSampler m_skyboxSampler;
-
 	Mesh m_skyboxMesh;
-
-	VkShaderModule skyVert, skyFrag;
-
-	GPUSceneData m_sceneData;
 
 	// queue deletion
 	DeletionQueue m_mainDeletionQueue;
@@ -185,12 +175,19 @@ private:
 	VkFramebuffer m_viewportFramebuffer{ VK_NULL_HANDLE };
 
 	// World
-
 	ErisWorld* m_activeWorld{ nullptr };
 	RenderObject* m_selectedObject{ nullptr };
 	std::map<std::string, Model>m_assetLibrary;
 
+	// Light
+	GPUSceneData m_sceneData;
+	VkDescriptorSetLayout m_globalSetLayout;
 
+	// Grid
+	VkDescriptorSet m_gridDescriptorSet;
+	VkPipeline m_gridPipeline;
+	VkPipelineLayout m_gridPipelineLayout;
+	VkSampler m_gridSampler;
 
 
 
@@ -206,6 +203,7 @@ public:
 	void initUIRenderPass();
 	void initPipelines();
 	void initSkyboxPipeline();
+	void initGridPipeline();
 
 
 	bool checkValidationLayerSupport();
@@ -214,7 +212,6 @@ public:
 
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 		auto app = reinterpret_cast<ErisEngine*>(glfwGetWindowUserPointer(window));
-		app->m_framebufferResized = true;
 	}
 	
 	bool isDeviceSuitable(VkPhysicalDevice device);
@@ -246,6 +243,8 @@ public:
 	void createSceneBuffers();
 	void initSkyboxDescriptor();
 	void initSkyboxMesh();
+
+
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
 	
 	void createDepthBuffer();
@@ -303,7 +302,7 @@ public:
 	Model* getOrLoadModel(const std::string& path);
 	void drawWorld(VkCommandBuffer cmd, ErisWorld& world);
 	RenderObject* pickObject(float mouseX, float mouseY);
-
+	ErisWorld* getActiveWorld() { return m_activeWorld; }
 
 
 };

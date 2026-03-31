@@ -8,8 +8,9 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>  
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
@@ -42,6 +43,7 @@ public:
 
     // 辅助函数：在物理世界创建一个盒子刚体
     JPH::BodyID createBox(glm::vec3 position, glm::vec3 halfExtent, bool isStatic);
+    JPH::BodyID createInfinitePlane();
 
     void destroyBody(JPH::BodyID bodyID);
 
@@ -50,6 +52,7 @@ public:
     void setTransform(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation);
 
     void resetBodyState(JPH::BodyID bodyID, glm::vec3 position, glm::vec3 rotation,glm::vec3 scale);
+    void resetVelocity(JPH::BodyID bodyID);
 
     JPH::BodyInterface& getBodyInterface() { return m_physicsSystem.GetBodyInterface(); }
 

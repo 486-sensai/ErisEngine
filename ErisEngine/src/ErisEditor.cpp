@@ -7,6 +7,29 @@ static PFN_vkVoidFunction Eris_ImGui_Loader(const char* function_name, void* use
     return vkGetInstanceProcAddr(*(VkInstance*)user_data, function_name);
 }
 
+static void syncToPhysics(ErisEngine* engine, RenderObject* obj) {
+    if (!obj->m_physicsEnabled || obj->m_bodyID.IsInvalid()) return;
+
+    // 1. 计算几何中心相对于原点的偏移
+    glm::vec3 localCenter = (obj->m_pModel->maxBound + obj->m_pModel->minBound) * 0.5f;
+
+    // 2. 计算当前旋转下的偏移矢量
+    glm::mat4 rotMat = glm::mat4(1.0f);
+    rotMat = glm::rotate(rotMat, glm::radians(obj->m_rotation.z), { 0, 0, 1 });
+    rotMat = glm::rotate(rotMat, glm::radians(obj->m_rotation.y), { 0, 1, 0 });
+    rotMat = glm::rotate(rotMat, glm::radians(obj->m_rotation.x), { 1, 0, 0 });
+    glm::vec3 rotatedOffset = glm::vec3(rotMat * glm::vec4(localCenter, 1.0f));
+
+    // 3. 物理中心 = 视觉原点 + 旋转后的偏移
+    glm::vec3 physicsPos = obj->m_location + rotatedOffset;
+
+    // 4. 调用你之前实现的 setTransform
+    engine->getActiveWorld()->getPhysics().setTransform(obj->m_bodyID, physicsPos, obj->m_rotation);
+
+    // 5. 顺便重置速度，防止手动移动后物体带着旧惯性乱飞
+    engine->getActiveWorld()->getPhysics().resetVelocity(obj->m_bodyID);
+}
+
 // -----调用文件资源管理器找文件
 static std::string OpenFileDialog(GLFWwindow* window) {
     char szFile[260] = { 0 };
@@ -38,9 +61,6 @@ static std::string OpenFileDialog(GLFWwindow* window) {
     return "";
 }
 
-void ErisEditor::uploadFonts(ErisEngine* engine)
-{
-}
 
 void ErisEditor::init(ErisEngine* engine) {
     // 1. 创建池
@@ -297,9 +317,20 @@ void ErisEditor::show_viewport(ErisEngine* engine)
             engine->m_selectedObject->m_scale = glm::make_vec3(matrixScale);
 
             if (engine->m_selectedObject->m_physicsEnabled) {
+                glm::vec3 localCenter = (engine->m_selectedObject->m_pModel->maxBound + engine->m_selectedObject->m_pModel->minBound) * 0.5f;
+
+                glm::mat4 rotMat = glm::mat4(1.0f);
+                rotMat = glm::rotate(rotMat, glm::radians(engine->m_selectedObject->m_rotation.z), { 0, 0, 1 });
+                rotMat = glm::rotate(rotMat, glm::radians(engine->m_selectedObject->m_rotation.y), { 0, 1, 0 });
+                rotMat = glm::rotate(rotMat, glm::radians(engine->m_selectedObject->m_rotation.x), { 1, 0, 0 });
+
+
+                // 计算物理中心 = 当前原点位置 + 旋转后的偏移
+                glm::vec3 rotatedOffset = glm::vec3(rotMat * glm::vec4(localCenter, 1.0f));
+
                 engine->m_activeWorld->getPhysics().setTransform(
                     engine->m_selectedObject->m_bodyID,
-                    engine->m_selectedObject->m_location,
+                    engine->m_selectedObject->m_location + rotatedOffset,
                     engine->m_selectedObject->m_rotation
                 );
             }
@@ -324,12 +355,12 @@ void ErisEditor::show_details(ErisEngine* engine)
         // 绑定数据到 UI 控件
         if (ImGui::DragFloat3("Location", &obj->m_location.x, 0.1f)) {
             if (obj->m_physicsEnabled) {
-                engine->m_activeWorld->getPhysics().setTransform(obj->m_bodyID, obj->m_location, obj->m_rotation);
+                syncToPhysics(engine, obj);
             }
         }
-        if (ImGui::DragFloat3("Location", &obj->m_location.x, 0.1f)) {
+        if (ImGui::DragFloat3("Rotation", &obj->m_location.x, 0.1f)) {
             if (obj->m_physicsEnabled) {
-                engine->m_activeWorld->getPhysics().setTransform(obj->m_bodyID, obj->m_location, obj->m_rotation);
+                syncToPhysics(engine, obj);
             }
         }
         ImGui::DragFloat3("Scale", &obj->m_scale.x, 0.01f);
@@ -342,14 +373,17 @@ void ErisEditor::show_details(ErisEngine* engine)
         if (!obj->m_physicsEnabled) {
             if (ImGui::Button("Enable Physics", ImVec2(-1, 0))) {
                 obj->m_physicsEnabled = true;
-
+                glm::vec3 minB = obj->m_pModel->minBound;
+                glm::vec3 maxB = obj->m_pModel->maxBound;
                 // 计算该模型的包围盒大小作为碰撞形状
-                glm::vec3 halfExtents = (obj->m_pModel->maxBound - obj->m_pModel->minBound) * 0.5f;
+                glm::vec3 localCenter = (maxB + minB) * 0.5f;   // 几何中心
+                glm::vec3 halfExtents = (maxB - minB) * 0.5f;   // 半长宽高
 
-                // 在 Jolt 世界里创建一个动态刚体
-                // 调用你之前在 ErisPhysics 实现的 createBox
+                obj->m_localCenter = localCenter;
+                glm::vec3 physicsStartPos = obj->m_location + localCenter;
+
                 obj->m_bodyID = engine->m_activeWorld->getPhysics().createBox(
-                    obj->m_location,
+                    physicsStartPos,
                     halfExtents,
                     false // false 代表动态（受重力）
                 );

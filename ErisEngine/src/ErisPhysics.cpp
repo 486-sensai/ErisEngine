@@ -119,6 +119,31 @@ JPH::BodyID ErisPhysics::createBox(glm::vec3 position, glm::vec3 halfExtent, boo
     return body->GetID();
 }
 
+JPH::BodyID ErisPhysics::createInfinitePlane()
+{
+    JPH::BodyInterface& body_interface = m_physicsSystem.GetBodyInterface();
+
+    // 1. 创建平面形状 (向上方向为 Y)
+    // 构造函数：Plane(法线, 偏移) -> (0,1,0) 偏移 0 即 Y=0 平面
+    JPH::PlaneShapeSettings plane_settings(JPH::Plane(JPH::Vec3(0.0f, 1.0f, 0.0f), 0.0f));
+    JPH::ShapeSettings::ShapeResult shape_result = plane_settings.Create();
+
+    JPH::ShapeRefC shape = shape_result.Get();
+
+    // 2. 创建设置：静态物体，属于 NON_MOVING 层
+    JPH::BodyCreationSettings settings(shape,
+        JPH::RVec3(0.0f, 0.0f, 0.0f),
+        JPH::Quat::sIdentity(),
+        JPH::EMotionType::Static,
+        Layers::NON_MOVING);
+
+    // 3. 创建并添加
+    JPH::Body* ground = body_interface.CreateBody(settings);
+    body_interface.AddBody(ground->GetID(), JPH::EActivation::DontActivate);
+
+    return ground->GetID();
+}
+
 void ErisPhysics::destroyBody(JPH::BodyID bodyID)
 {
     if (bodyID.IsInvalid()) return;
@@ -185,6 +210,16 @@ void ErisPhysics::resetBodyState(JPH::BodyID bodyID, glm::vec3 position, glm::ve
     // 3. 瞬间移动并强行激活 (Activate)
     // 激活是为了确保重置后的物体立即受重力影响，而不是停在半空
     body_interface.SetPositionAndRotation(bodyID, jph_pos, jph_rot, JPH::EActivation::Activate);
+}
+
+void ErisPhysics::resetVelocity(JPH::BodyID bodyID)
+{
+    if (bodyID.IsInvalid()) return;
+
+    JPH::BodyInterface& body_interface = m_physicsSystem.GetBodyInterface();
+
+    body_interface.SetLinearVelocity(bodyID, JPH::Vec3::sZero());
+    body_interface.SetAngularVelocity(bodyID, JPH::Vec3::sZero());
 }
 
 void ErisPhysics::cleanup() {

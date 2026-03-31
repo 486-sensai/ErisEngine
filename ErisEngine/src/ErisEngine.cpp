@@ -66,15 +66,12 @@ int ErisEngine::Eris_init()
 	initDescriptorPool();
 	initPipelines();
 	initSkyboxPipeline();
+	initGridPipeline();
 	createSceneBuffers();
 	initSkyboxMesh();
 
 	m_activeWorld = new ErisWorld();
-	m_activeWorld->getPhysics().createBox(
-		glm::vec3(0.0f, -2.0f, 0.0f),
-		glm::vec3(100.0f, 1.0f, 100.0f),
-		true
-	);
+	m_activeWorld->getPhysics().createInfinitePlane();
 
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
@@ -88,19 +85,26 @@ int ErisEngine::Eris_init()
 	// 初始化世界光
 	initSceneData();
 
-	if (!loadModelFromFile("assets/sportsCar/sportsCar.obj", m_model)) {
-		throw std::runtime_error("failed to load model!");
+
+	Model* pSportCar = getOrLoadModel("assets/sportsCar/sportsCar.obj");
+	Model* pGroundAsset = getOrLoadModel("assets/ground/churchfloor.obj");
+	if (pGroundAsset) {
+		RenderObject* ground = m_activeWorld->spawnObject(pGroundAsset, "Main_Ground");
+
+		ground->m_location = glm::vec3(0.0f, -0.01f, 0.0f);
+
+		ground->m_scale = glm::vec3(1.0f, 1.0f, 1.0f);
+
+		ground->m_initialLocation = ground->m_location;
 	}
-	m_model.uploadModel(m_allocator, this);
-	
 
 	// debug用 测试对象
 	{
 		// 生成两辆车，放在不同位置
-		RenderObject* car1 = m_activeWorld->spawnObject(&m_model, "Main_Car");
+		RenderObject* car1 = m_activeWorld->spawnObject(pSportCar, "Main_Car");
 		car1->m_location = glm::vec3(0.0f, 0.0f, 0.0f);
 
-		RenderObject* car2 = m_activeWorld->spawnObject(&m_model, "Backup_Car");
+		RenderObject* car2 = m_activeWorld->spawnObject(pSportCar, "Backup_Car");
 		car2->m_initialLocation=car2->m_location = glm::vec3(5.0f, 0.0f, -2.0f);
 		car2->m_scale = glm::vec3(0.5f);
 
@@ -709,6 +713,60 @@ void ErisEngine::initSkyboxPipeline()
 		vkDestroyPipelineLayout(m_device, m_skyboxPipelineLayout, nullptr);
 		vkDestroyPipeline(m_device, m_skyboxPipeline, nullptr);
 		});
+}
+
+void ErisEngine::initGridPipeline()
+{
+	VkShaderModule vertMod, fragMod;
+	if (!loadShaderModule("shaders/grid_vert.spv", &vertMod) != VK_SUCCESS
+		|| !loadShaderModule("shaders/grid_frag.spv", &fragMod) != VK_SUCCESS) {
+		throw std::runtime_error("failed to load grid shaders!");
+	}
+
+	std::array<VkDescriptorSetLayout, 1>layouts = { m_globalSetLayout };
+	VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	layoutInfo.setLayoutCount = 1;
+	layoutInfo.pSetLayouts = layouts.data();
+	if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_gridPipelineLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create grid pipeline layout!");
+	}
+	PipelineBuilder builder;
+	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertMod, "main" });
+	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragMod, "main" });
+
+	builder.m_vertexInputInfo = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	builder.m_inputAssembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, nullptr, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE };
+
+	builder.m_viewport = { 0.0f, 0.0f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f };
+	builder.m_scissor = { {0, 0}, m_swapchainExtent };
+	builder.m_rasterizer = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, nullptr, 0, VK_FALSE, VK_FALSE, VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE, VK_FALSE, 0.0f, 0.0f, 0.0f, 1.0f };
+	builder.m_multisampling = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, nullptr, 0, VK_SAMPLE_COUNT_1_BIT };
+
+	builder.m_colorBlendAttachment.blendEnable = VK_TRUE;
+	builder.m_colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	builder.m_colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	builder.m_colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	builder.m_colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	builder.m_colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	builder.m_colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	builder.m_colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+	builder.m_depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	builder.m_depthStencil.depthTestEnable = VK_TRUE;  // 必须开启，用于检测是否被车遮挡
+	builder.m_depthStencil.depthWriteEnable = VK_FALSE; // 必须关闭，因为网格是透明的
+	builder.m_depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+	builder.m_pipelineLayout = m_gridPipelineLayout;
+	m_gridPipeline = builder.buildPipeline(m_device, m_renderPass);
+
+	vkDestroyShaderModule(m_device, vertMod, nullptr);
+	vkDestroyShaderModule(m_device, fragMod, nullptr);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipelineLayout(m_device, m_gridPipelineLayout, nullptr);
+		vkDestroyPipeline(m_device, m_gridPipeline, nullptr);
+		});
+
 }
 
 FrameData& ErisEngine::getCurrentFrame()
@@ -2375,7 +2433,6 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 		}
 	}
 
-
 	// ---------------------------------------------------------
 	// --- 3. 绘制天空盒 (放在物体之后，利用深度测试) ---
 	// ---------------------------------------------------------
@@ -2396,6 +2453,17 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 
 	// 绘制 36 个索引（立方体）
 	vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
+
+	// ---------------------------------------------------------
+   // 2. 【新增】：渲染无限网格
+   // ---------------------------------------------------------
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gridPipeline);
+
+	// 只绑定 Set 0 (全局 UBO)
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gridPipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
+
+	// 因为顶点在 Shader 里，所以直接画 6 个点即可
+	vkCmdDraw(cmd, 6, 1, 0, 0);
 }
 
 RenderObject* ErisEngine::pickObject(float mouseX, float mouseY)
