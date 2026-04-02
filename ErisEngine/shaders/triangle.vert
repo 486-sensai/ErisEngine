@@ -10,6 +10,7 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragUV;
 layout(location = 2) out vec3 fragNormal;
 layout(location = 3) out vec3 viewPos;
+layout(location = 4) out vec4 fragPosLightSpace;
 
 struct GPUPointLight {
     vec4 position;
@@ -19,6 +20,8 @@ struct GPUPointLight {
 layout(set = 0, binding = 0) uniform SceneData {
     mat4 view;
     mat4 proj;
+    mat4 sunlightProj;
+    vec4 viewPos;
     vec4 fogColor;
     vec4 ambientColor;
     vec4 sunlightDir;
@@ -35,9 +38,11 @@ layout(push_constant) uniform constants {
 void main() {
     vec4 worldPos = PushConstants.model_matrix * vec4(inPos, 1.0);
     gl_Position = PushConstants.render_matrix * vec4(inPos, 1.0);
+    fragPosLightSpace = scene.sunlightProj * worldPos;
 
-    fragColor = inColor;
     fragUV = inUV;
-    fragNormal = mat3(PushConstants.model_matrix) * inNormal;
+    fragColor = inColor;
     viewPos = worldPos.xyz;
+    fragNormal = mat3(PushConstants.model_matrix) * inNormal;
+
 }

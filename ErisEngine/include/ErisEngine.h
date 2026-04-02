@@ -189,6 +189,13 @@ private:
 	VkPipelineLayout m_gridPipelineLayout;
 	VkSampler m_gridSampler;
 
+	// Shadow
+	AllocatedImage m_shadowImage;
+	VkRenderPass m_shadowRenderPass;
+	VkFramebuffer m_shadowFrameBuffer;
+	VkPipeline m_shadowPipeline;
+	VkPipelineLayout m_shadowPipelineLayout;
+	VkExtent2D m_shadowExtent;
 
 
 public:
@@ -204,6 +211,9 @@ public:
 	void initPipelines();
 	void initSkyboxPipeline();
 	void initGridPipeline();
+	void initShadowPipeline();
+	void initDescriptors();
+	void initDescriptorPool();
 
 
 	bool checkValidationLayerSupport();
@@ -235,31 +245,31 @@ public:
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
 
+	AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 
 	void createSwapchain();
 	void recreateSwapchain();
 	void createImageViews();
+	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
+
+	void createDepthBuffer();
 	void createFramebuffers();
 	void createSceneBuffers();
 	void initSkyboxDescriptor();
+
+
 	void initSkyboxMesh();
+	void initShadowResources();
 
-
-	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
-	
-	void createDepthBuffer();
 	VkFormat findDepthFormat();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 
 	FrameData& getCurrentFrame();
 	void drawFrame();
 
-	AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
-	void initDescriptors();
-	void initDescriptorPool();
 	VkDescriptorSet createDescriptorSet(AllocatedImage& img);
 	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,uint32_t layerCount);
 
@@ -288,7 +298,6 @@ public:
 	void initSceneData();
 
 
-
 	// ----------------------Handle External Events------------------------
 	void handleInput(float deltaTime);
 
@@ -300,7 +309,7 @@ public:
 	// World functions
 
 	Model* getOrLoadModel(const std::string& path);
-	void drawWorld(VkCommandBuffer cmd, ErisWorld& world);
+	void drawWorld(VkCommandBuffer cmd, ErisWorld& world,bool isShadowPass);
 	RenderObject* pickObject(float mouseX, float mouseY);
 	ErisWorld* getActiveWorld() { return m_activeWorld; }
 

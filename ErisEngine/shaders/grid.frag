@@ -4,56 +4,102 @@
 layout(location = 0) in vec3 nearPoint;
 layout(location = 1) in vec3 farPoint;
 
+struct GPUPointLight {
+    vec4 position;
+    vec4 color;
+};
+
 layout(set = 0, binding = 0) uniform SceneData {
     mat4 view;
     mat4 proj;
+    mat4 sunlightProj;
+    vec4 viewPos;
+    vec4 fogColor;
+    vec4 ambientColor;
+    vec4 sunlightDir;
+    vec4 sunlightColor;
+    GPUPointLight pointLights[8];
+    int lightCount;
 } scene;
+
+layout(set = 0, binding = 1) uniform sampler2D shadowMap;
 
 layout(location = 0) out vec4 outColor;
 
-float computeDepth(vec3 pos) {
-    vec4 clip_space_pos = scene.proj * scene.view * vec4(pos.xyz, 1.0);
-    float clip_depth = clip_space_pos.z / clip_space_pos.w;
-    // 关键修正：将深度稍微减小一点点（0.9999），确保它永远小于背景清除值 1.0
-    // 这样网格在没有模型的地方也能显示出来，并遮挡天空盒
-    return clamp(clip_depth, 0.0, 0.99999);
+// 计算该像素对应的 Vulkan 深度值 [0, 1]
+float computeDepth(vec3 worldPos) {
+    vec4 clip_space_pos = scene.proj * scene.view * vec4(worldPos, 1.0);
+    float depth = clip_space_pos.z / clip_space_pos.w;
+    return clamp(depth, 0.0, 0.999999);
+}
+
+// 带有 PCF 柔和边缘的阴影计算
+float calculateShadow(vec3 worldPos) {
+    vec4 shadowPos = scene.sunlightProj * vec4(worldPos, 1.0);
+    vec3 projCoords = shadowPos.xyz / shadowPos.w;
+    
+    // 转换到 UV 空间 [0, 1] (Vulkan Z本身就是 [0,1]，不需要 *0.5+0.5)
+    vec2 uv = projCoords.xy * 0.5 + 0.5;
+
+    // 超出光源照射范围的地方不产生阴影
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || projCoords.z > 1.0) {
+        return 0.0;
+    }
+
+    float currentDepth = projCoords.z;
+    
+    // 【核心修正】：Bias 必须非常小，适应 [0, 1] 的空间
+    // 因为你的正交矩阵远近裁面相差近 200，0.002 大约代表 0.4 个世界单位的容差
+    float bias = 0.002; 
+    
+    // PCF (百分比渐近滤波) - 采样周围 9 个像素求平均，产生软阴影
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    
+    for(int x = -1; x <= 1; ++x) {
+        for(int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, uv + vec2(x, y) * texelSize).r; 
+            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
+        }    
+    }
+    shadow /= 9.0;
+    
+    return shadow;
 }
 
 void main() {
     float t = -nearPoint.y / (farPoint.y - nearPoint.y);
-    
-    // 如果射线不指向 Y=0 平面（看向天空方向），直接丢弃
     if (t <= 0) discard;
 
     vec3 fragPos3D = nearPoint + t * (farPoint - nearPoint);
 
-    // 1. 写入深度，解决遮挡关系
+    // 写入深度
     gl_FragDepth = computeDepth(fragPos3D);
 
-    // 2. 计算网格线
+    // 计算阴影 (返回值为 0.0 到 1.0，越大代表越处于阴影中)
+    float shadow = calculateShadow(fragPos3D);
+
     vec2 coord = fragPos3D.xz;
     vec2 derivative = fwidth(coord);
     vec2 grid = abs(fract(coord - 0.5) - 0.5) / derivative;
     float line = min(grid.x, grid.y);
-    float alpha = 1.0 - min(line, 1.0);
+    float lineAlpha = 1.0 - min(line, 1.0);
 
-    // 3. 【满足你的要求】：定义地面基础色，不再透明，从而遮挡天空盒
-    // 背景设为深灰色
-    vec4 backgroundColor = vec4(0.1, 0.1, 0.1, 1.0); 
-    // 网格线设为浅灰色
-    vec4 lineColor = vec4(0.3, 0.3, 0.3, 1.0);
+    vec3 groundColor = vec3(0.1); 
+    vec3 lineColor = vec3(0.25);  
 
-    // 绘制坐标轴
-    if(abs(fragPos3D.z) < 0.1 * derivative.y) lineColor = vec4(1.0, 0.0, 0.0, 1.0); // X轴红
-    if(abs(fragPos3D.x) < 0.1 * derivative.x) lineColor = vec4(0.0, 0.0, 1.0, 1.0); // Z轴蓝
+    if(abs(fragPos3D.z) < 0.1 * derivative.y) lineColor = vec3(1.0, 0.0, 0.0);
+    if(abs(fragPos3D.x) < 0.1 * derivative.x) lineColor = vec3(0.0, 0.0, 1.0);
 
-    // 混合背景和线条
-    vec4 finalColor = mix(backgroundColor, lineColor, alpha);
+    vec3 finalColor = mix(groundColor, lineColor, lineAlpha);
 
-    // 4. 边缘淡出：让地平线和天空平滑过渡，不产生硬边
-    float viewDist = length(fragPos3D - nearPoint);
-    float fading = max(0.0, 1.0 - (viewDist / 100.0)); // 100米外淡出
+    // 【应用阴影】：mix 函数让阴影过渡更平滑，0.4 是阴影最暗处的亮度
+    finalColor = mix(finalColor, finalColor * 0.4, shadow);
 
-    outColor = finalColor;
-    outColor.a *= fading; // 整体淡出，地平线处会慢慢变透明透出天空盒
+    float viewDist = length(fragPos3D - scene.viewPos.xyz);
+    float fading = max(0.0, 1.0 - (viewDist / 100.0)); 
+
+    outColor = vec4(finalColor, fading);
+    
+    // 注：删除了底部的绿色测试代码，让正常的颜色输出生效
 }

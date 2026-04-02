@@ -116,11 +116,12 @@ struct GPUPointLight {
 struct GPUSceneData {
     glm::mat4 view;
     glm::mat4 proj;
+    glm::mat4 sunlightProj;
+    glm::vec4 viewPos;
     glm::vec4 fogColor;
     glm::vec4 ambientColor;
     glm::vec4 sunlightDir;
     glm::vec4 sunlightColor;
-
     GPUPointLight pointLights[8];
     int lightCount;                 // 当前实际开启的灯光数
     float padding[3];               // 填充字节，保证结构体总大小是16的倍数

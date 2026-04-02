@@ -67,6 +67,8 @@ int ErisEngine::Eris_init()
 	initPipelines();
 	initSkyboxPipeline();
 	initGridPipeline();
+	initShadowResources();
+	initShadowPipeline();
 	createSceneBuffers();
 	initSkyboxMesh();
 
@@ -374,7 +376,8 @@ void ErisEngine::recreateSwapchain()
 	createImageViews();
 	createDepthBuffer();    // 必须重新创建深度缓冲，因为它跟分辨率相关
 	createFramebuffers();   // 重新绑定
-
+	initShadowResources();
+	createSceneBuffers();
 	initViewportResources();
 	ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(m_swapchainImages.size()));
 }
@@ -435,15 +438,29 @@ void ErisEngine::createSceneBuffers()
 		binfo.offset = 0;
 		binfo.range = sizeof(GPUSceneData);
 
-		VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		write.dstSet = m_frames[i].sceneDescriptorSet;
-		write.dstBinding = 0;
-		write.descriptorCount = 1;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		write.pBufferInfo = &binfo;
+		VkWriteDescriptorSet uboWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		uboWrite.dstSet = m_frames[i].sceneDescriptorSet;
+		uboWrite.dstBinding = 0;
+		uboWrite.descriptorCount = 1;
+		uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		uboWrite.pBufferInfo = &binfo;
 
-		vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+		VkDescriptorImageInfo shadowImageInfo{};
+		shadowImageInfo.sampler = m_skyboxSampler;
+		shadowImageInfo.imageView = m_shadowImage.imageView;
+		shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		VkWriteDescriptorSet shadowWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		shadowWrite.dstSet = m_frames[i].sceneDescriptorSet;
+		shadowWrite.dstBinding = 1;											// 对应 Shader 里的 layout(set=0, binding=1)
+		shadowWrite.descriptorCount = 1;
+		shadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		shadowWrite.pImageInfo = &shadowImageInfo;
+
+		std::array<VkWriteDescriptorSet, 2> writes = { uboWrite,shadowWrite };
+		vkUpdateDescriptorSets(m_device, 2, writes.data(), 0, nullptr);
 	}
+
 
 
 }
@@ -734,6 +751,7 @@ void ErisEngine::initGridPipeline()
 	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertMod, "main" });
 	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragMod, "main" });
 
+
 	builder.m_vertexInputInfo = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 	builder.m_inputAssembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, nullptr, 0, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE };
 
@@ -767,6 +785,148 @@ void ErisEngine::initGridPipeline()
 		vkDestroyPipeline(m_device, m_gridPipeline, nullptr);
 		});
 
+}
+
+void ErisEngine::initShadowResources()
+{
+	m_shadowExtent = { 2048, 2048 }; // 阴影图尺寸
+
+	// 1. 创建阴影深度图像 (使用 VMA)
+	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = m_depthFormat; // 建议 D32_SFLOAT
+	imgInfo.extent = { m_shadowExtent.width, m_shadowExtent.height, 1 };
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	// 关键：既是深度附件，又要作为贴图被采样
+	imgInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+
+	VmaAllocationCreateInfo vmaAllocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &vmaAllocInfo,
+		&m_shadowImage.image, &m_shadowImage.allocation, nullptr);
+
+	// 2. 创建图像视图
+	m_shadowImage.imageView = createImageView(m_shadowImage.image, m_depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+
+	// 3. 创建阴影 RenderPass (仅处理深度)
+	VkAttachmentDescription depthAttachment{};
+	depthAttachment.format = m_depthFormat;
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;    // 每一帧开始清空
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // 存下来供主 Pass 读取
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 画完直接进入读取状态
+
+	VkAttachmentReference depthRef = { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
+	VkSubpassDescription subpass = {};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.pDepthStencilAttachment = &depthRef;
+
+	VkRenderPassCreateInfo rpInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rpInfo.attachmentCount = 1;
+	rpInfo.pAttachments = &depthAttachment;
+	rpInfo.subpassCount = 1;
+	rpInfo.pSubpasses = &subpass;
+
+	if (vkCreateRenderPass(m_device, &rpInfo, nullptr, &m_shadowRenderPass) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create shadow render pass!");
+	}
+
+	// 4. 创建阴影 Framebuffer
+	VkFramebufferCreateInfo fbInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fbInfo.renderPass = m_shadowRenderPass;
+	fbInfo.attachmentCount = 1;
+	fbInfo.pAttachments = &m_shadowImage.imageView;
+	fbInfo.width = m_shadowExtent.width;
+	fbInfo.height = m_shadowExtent.height;
+	fbInfo.layers = 1;
+
+	vkCreateFramebuffer(m_device, &fbInfo, nullptr, &m_shadowFrameBuffer);
+
+	// 5. 注册销毁
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyFramebuffer(m_device, m_shadowFrameBuffer, nullptr);
+		vkDestroyRenderPass(m_device, m_shadowRenderPass, nullptr);
+		vkDestroyImageView(m_device, m_shadowImage.imageView, nullptr);
+		vmaDestroyImage(m_allocator, m_shadowImage.image, m_shadowImage.allocation);
+		});
+}
+
+void ErisEngine::initShadowPipeline()
+{
+	VkShaderModule shadowVert;
+	if (!loadShaderModule("shaders/shadow_vert.spv", &shadowVert) != VK_SUCCESS) {
+		throw std::runtime_error("failed to load shadow vert shader!");
+	}
+	// 为什么是m_globalSetLayout
+	std::array<VkDescriptorSetLayout, 1> layouts{ m_globalSetLayout };
+	VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	layoutInfo.setLayoutCount = 1;
+	layoutInfo.pSetLayouts = layouts.data();
+
+	VkPushConstantRange pushConstantRange = { VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(MeshPushConstants) };
+	layoutInfo.pushConstantRangeCount = 1;
+	layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+
+	if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_shadowPipelineLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create shadow pipeline layout!");
+	}
+
+	PipelineBuilder builder;
+	builder.m_shaderStages.push_back({ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, shadowVert, "main" });
+
+	auto bindingDescription = Vertex::getBindingDescription();
+	auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+	builder.m_vertexBindings.push_back(bindingDescription);
+	builder.m_vertexAttributes = attributeDescriptions;
+	builder.m_vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	builder.m_inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	builder.m_inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	builder.m_inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	builder.m_dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	builder.m_viewport = { 0.0f,0.0f,(float)m_swapchainExtent.width,(float)m_swapchainExtent.height,0.0f,1.0f };
+	builder.m_scissor = { {0,0},m_swapchainExtent };
+
+	builder.m_depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	builder.m_depthStencil.depthTestEnable = VK_TRUE;
+	builder.m_depthStencil.depthWriteEnable = VK_TRUE;
+	builder.m_depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+	builder.m_rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	builder.m_rasterizer.depthClampEnable = VK_FALSE;
+	builder.m_rasterizer.rasterizerDiscardEnable = VK_FALSE;
+	builder.m_rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	builder.m_rasterizer.cullMode = VK_CULL_MODE_NONE; 
+	//builder.m_rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	builder.m_rasterizer.lineWidth = 1.0f;
+	builder.m_rasterizer.depthBiasEnable = VK_TRUE;
+	builder.m_rasterizer.depthBiasConstantFactor = 4.0f;
+	builder.m_rasterizer.depthBiasSlopeFactor = 1.5f;
+
+	builder.m_multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	builder.m_multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	builder.m_colorBlendAttachment = {}; // 清空附件
+	builder.m_colorBlendAttachment.blendEnable = VK_FALSE;
+	builder.m_colorBlendAttachment.colorWriteMask = 0; // 不写入任何颜色通道
+
+	builder.m_pipelineLayout = m_shadowPipelineLayout;
+	m_shadowPipeline = builder.buildPipeline(m_device, m_shadowRenderPass);
+
+	vkDestroyShaderModule(m_device, shadowVert, nullptr);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipelineLayout(m_device, m_shadowPipelineLayout, nullptr);
+		vkDestroyPipeline(m_device, m_shadowPipeline, nullptr);
+		});
 }
 
 FrameData& ErisEngine::getCurrentFrame()
@@ -1511,17 +1671,26 @@ void ErisEngine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& func
 
 void ErisEngine::initDescriptors() {
 	// ---------------------------------------------------------
-	// 1. 创建全局布局 (Set 0) - 用于 GPUSceneData
+	// 1. 创建全局以及阴影布局 (Set 0) - 用于 GPUSceneData
 	// ---------------------------------------------------------
-	VkDescriptorSetLayoutBinding sceneBind{};
-	sceneBind.binding = 0;
-	sceneBind.descriptorCount = 1;
-	sceneBind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	sceneBind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	VkDescriptorSetLayoutBinding sceneBinds[2];
+
+    // Binding 0: 全局 UBO 数据
+	sceneBinds[0].binding = 0;
+	sceneBinds[0].descriptorCount = 1;
+	sceneBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	sceneBinds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	// Binding 1: 阴影深度贴图 (Sampler)
+	sceneBinds[1].binding = 1;
+	sceneBinds[1].descriptorCount = 1;
+	sceneBinds[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	sceneBinds[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	sceneBinds[1].pImmutableSamplers = nullptr;
 
 	VkDescriptorSetLayoutCreateInfo globalLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	globalLayoutInfo.bindingCount = 1;
-	globalLayoutInfo.pBindings = &sceneBind;
+	globalLayoutInfo.bindingCount = 2;
+	globalLayoutInfo.pBindings = sceneBinds;
 	if (vkCreateDescriptorSetLayout(m_device, &globalLayoutInfo, nullptr, &m_globalSetLayout) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create global descriptor set layout!");
 	}
@@ -1685,11 +1854,26 @@ void ErisEngine::drawFrame()
 
 	vkResetFences(m_device, 1, &frame.m_renderFence);
 	vkResetCommandPool(m_device, frame.m_commandPool, 0);
+	
 
 	m_editor->render_editor(this);
 	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
 	m_sceneData.view = m_camera.getViewMatrix();
 	m_sceneData.proj = m_camera.getProjectionMatrix(aspect);
+
+	glm::vec3 lightPos = glm::vec3(m_sceneData.sunlightDir) * 40.0f;
+	glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+	glm::mat4 lightProj = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 100.0f);
+	lightProj[1][1] *= -1;
+
+	// in memorial of this disater!!!!!
+	glm::mat4 vulkanZ = glm::mat4(1.0f);
+	vulkanZ[2][2] = 0.5f;
+	vulkanZ[3][2] = 0.5f;
+
+	m_sceneData.sunlightProj = vulkanZ * lightProj * lightView;
+	m_sceneData.viewPos = glm::vec4(m_camera.m_position, 1.0f);
+
 
 	// 2. 将数据写入本帧的 UBO 内存
 	void* data;
@@ -1704,6 +1888,36 @@ void ErisEngine::drawFrame()
 	if (vkBeginCommandBuffer(frame.m_mainCommandBuffer, &beginInfo) != VK_SUCCESS) {
 		throw std::runtime_error("failed to begin recording command buffer!");
 	}
+
+	// 【PASS 0: 阴影渲染】 - 目标是 2048x2048 的深度图
+	VkRenderPassBeginInfo shadowRpInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	shadowRpInfo.renderPass = m_shadowRenderPass;
+	shadowRpInfo.framebuffer = m_shadowFrameBuffer;
+	shadowRpInfo.renderArea.extent = m_shadowExtent;
+	VkClearValue shadowClear;
+	shadowClear.depthStencil = { 1.0f, 0 };
+	shadowRpInfo.clearValueCount = 1;
+	shadowRpInfo.pClearValues = &shadowClear;
+
+	vkCmdBeginRenderPass(cmd, &shadowRpInfo, VK_SUBPASS_CONTENTS_INLINE);
+		// 调用 drawWorld 传入 true，只画深度
+		drawWorld(cmd, *m_activeWorld, true);
+	vkCmdEndRenderPass(cmd);
+
+	// ------------------------------------------------------------------
+	VkImageMemoryBarrier shadowBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	shadowBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 匹配 RenderPass 的 finalLayout
+	shadowBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	shadowBarrier.image = m_shadowImage.image;
+	shadowBarrier.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+	shadowBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	shadowBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+	vkCmdPipelineBarrier(cmd,
+		VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &shadowBarrier);
+	// ------------------------------------------------------------------
 
 	std::array<VkClearValue, 2> clearValues{};
 	clearValues[0].color = { {0.03f, 0.03f, 0.03f, 1.0f} }; // 颜色清除
@@ -1740,7 +1954,7 @@ void ErisEngine::drawFrame()
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 
 		if (m_activeWorld) {
-			drawWorld(frame.m_mainCommandBuffer, *m_activeWorld);
+			drawWorld(frame.m_mainCommandBuffer, *m_activeWorld, false);
 		}
 
 
@@ -1833,6 +2047,13 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
 
 	VkPipelineStageFlags sourceStage;
 	VkPipelineStageFlags destinationStage;
+
+	if (format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT) {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+	else {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	}
 
 	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
 		barrier.srcAccessMask = 0;
@@ -2086,12 +2307,6 @@ bool ErisEngine::loadModelFromFile(const std::string& filename, Model& outModel)
 	for (uint32_t i = 0; i < scene->mNumMaterials; i++) {
 		aiMaterial* aiMat = scene->mMaterials[i];
 		Material engineMat;
-		//engineMat.textureSet = m_defaultTextureSet;
-
-		// 1. 获取 Diffuse 颜色 (Kd)
-		//aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
-		//aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor);
-		// 我们暂时将颜色存入每一个顶点（见下文网格加载环节）
 
 		// 2. 加载贴图 (map_Kd)
 		aiString path;
@@ -2349,6 +2564,7 @@ void ErisEngine::initDefaultResources() {
 void ErisEngine::initSceneData()
 {
 	memset(&m_sceneData, 0, sizeof(GPUSceneData));
+	
 	m_sceneData.fogColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
 	m_sceneData.ambientColor = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
 	m_sceneData.sunlightDir = glm::vec4(0.5f, 1.0f, 0.3f, 1.0f);
@@ -2383,7 +2599,7 @@ Model* ErisEngine::getOrLoadModel(const std::string& path) {
 	return nullptr;
 }
 
-void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
+void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world,bool isShadowPass) {
 
 	FrameData& frame = getCurrentFrame();
 	
@@ -2391,10 +2607,28 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
 	glm::mat4 projection = m_camera.getProjectionMatrix(aspect);
 	glm::mat4 view = m_camera.getViewMatrix();
-	
+
+	VkPipeline currentPipeline = isShadowPass ? m_shadowPipeline : m_pipeline;
+	VkPipelineLayout currentLayout = isShadowPass ? m_shadowPipelineLayout : m_pipelineLayout;
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipeline);
+
+	VkViewport viewport{};
+	VkRect2D scissor{};
+	if (isShadowPass) {
+		viewport = { 0.f, 0.f, (float)m_shadowExtent.width, (float)m_shadowExtent.height, 0.f, 1.f };
+		scissor.extent = m_shadowExtent;
+	}
+	else {
+		viewport = { 0.f, 0.f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.f, 1.f };
+		scissor.extent = m_swapchainExtent;
+	}
+	scissor.offset = { 0, 0 };
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		m_pipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
+		currentLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 
 	// 2. 遍历世界里所有的物体
 	for (auto& objPtr : world.getObjects()) {
@@ -2403,35 +2637,43 @@ void ErisEngine::drawWorld(VkCommandBuffer cmd, ErisWorld& world) {
 
 		glm::mat4 modelMatrix = obj.getTransformMatrix();
 		MeshPushConstants constants;
-		constants.render_matrix = projection * view * modelMatrix;
+		if (isShadowPass) {
+			constants.render_matrix = modelMatrix;
+		}
+		else {
+			constants.render_matrix = projection * view * modelMatrix;
+		}
 		constants.model_matrix = modelMatrix;
 
 		// 推送当前物体的矩阵
-		vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+		vkCmdPushConstants(cmd, currentLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
 
 
 		// --- 这里是原本遍历 mesh 的循环 ---
 		for (auto& mesh : obj.m_pModel->meshes) {
 			if (mesh.vertexBuffer.buffer == VK_NULL_HANDLE) continue;
 
-			// 绑定描述符集 (Set 0)
-			VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
-				? mesh.material->textureSet : m_defaultTextureSet;
 
+			if (!isShadowPass) {
+				// 绑定描述符集 (Set 0)
+				VkDescriptorSet set_to_bind = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
+					? mesh.material->textureSet : m_defaultTextureSet;
 
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
-				m_pipelineLayout, 1, 1, &set_to_bind, 0, nullptr);
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, 
+					currentLayout, 1, 1, &set_to_bind, 0, nullptr);
+			}
+
 
 			// 绑定顶点和索引
 			VkBuffer vBuffers[] = { mesh.vertexBuffer.buffer };
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindVertexBuffers(cmd, 0, 1, vBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-			// 绘制
 			vkCmdDrawIndexed(cmd, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
-
 		}
 	}
+
+	if (isShadowPass)return;
 
 	// ---------------------------------------------------------
 	// --- 3. 绘制天空盒 (放在物体之后，利用深度测试) ---
