@@ -26,6 +26,23 @@ struct AllocatedImage {
 	VkFormat imageFormat;
 };
 
+struct FrameData {
+    VkCommandPool m_commandPool;
+    VkCommandBuffer m_mainCommandBuffer;
+    VkSemaphore m_presentSemaphore;
+    VkSemaphore m_renderSemaphore;
+    VkFence m_renderFence;
+
+    AllocatedBuffer sceneBuffer;
+    VkDescriptorSet sceneDescriptorSet;
+};
+
+struct MeshPushConstants {
+    glm::mat4 render_matrix;	// MVP
+    glm::mat4 model_matrix;		// M
+    glm::vec4 materialParams;	// 新增：x=roughness, y=metallic, z=emission, w=padding
+};
+
 
 struct Vertex {
 	glm::vec3 pos;
@@ -77,6 +94,10 @@ struct Material {
     VkDescriptorSet textureSet{ VK_NULL_HANDLE }; // 该材质特有的贴图插槽
     AllocatedImage diffuseTexture;               // 该材质的贴图
     std::string name;
+
+    float roughness = 0.5f;     // 粗糙度 (0.0 最光滑, 1.0 最粗糙)
+    float metallic = 0.0f;      // 金属度 (0.0 非金属, 1.0 纯金属)
+    float emission = 0.0f;      // 自发光强度
 };
 
 struct Mesh {
@@ -127,3 +148,12 @@ struct GPUSceneData {
     float padding[3];               // 填充字节，保证结构体总大小是16的倍数
 };
 
+
+
+struct GBuffer {
+    AllocatedImage position; // RGB: 世界坐标, A: 占位
+    AllocatedImage normal;   // RGB: 法线, A: 金属度
+    AllocatedImage albedo;   // RGB: 基础色, A: 粗糙度
+
+    // 深度直接复用原有的 m_depthImage
+};

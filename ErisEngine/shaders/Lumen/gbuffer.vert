@@ -9,41 +9,27 @@ layout(location = 3) in vec2 inUV;
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragUV;
 layout(location = 2) out vec3 fragNormal;
-layout(location = 3) out vec3 worldPos; // 【修改】改名为 worldPos 更准确
-layout(location = 4) out vec4 fragPosLightSpace;
-
-struct GPUPointLight {
-    vec4 position;
-    vec4 color;
-};
+layout(location = 3) out vec3 worldPos;
 
 layout(set = 0, binding = 0) uniform SceneData {
     mat4 view;
     mat4 proj;
     mat4 sunlightProj;
-    vec4 viewPos;
-    vec4 fogColor;
-    vec4 ambientColor;
-    vec4 sunlightDir;
-    vec4 sunlightColor;
-    GPUPointLight pointLights[8];
-    int lightCount;
 } scene;
 
-// 【修改】添加了 materialParams
 layout(push_constant) uniform constants {
-    mat4 render_matrix;
-    mat4 model_matrix;
-    vec4 materialParams; // x: 粗糙度, y: 金属度, z: 发光强度, w: 占位
+    mat4 render_matrix; // Projection * View * Model
+    mat4 model_matrix;  // Model
+    vec4 materialParams; 
 } PushConstants;
 
 void main() {
     vec4 wPos = PushConstants.model_matrix * vec4(inPos, 1.0);
     gl_Position = PushConstants.render_matrix * vec4(inPos, 1.0);
-    fragPosLightSpace = scene.sunlightProj * wPos;
 
     fragUV = inUV;
     fragColor = inColor;
     worldPos = wPos.xyz;
+    // 传导法线到世界空间
     fragNormal = mat3(PushConstants.model_matrix) * inNormal;
 }

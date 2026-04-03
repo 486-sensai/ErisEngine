@@ -40,21 +40,7 @@ const bool enableValidationLayers = true;
 
 const int MAX_FRAMES_IN_FLIGHT = 3;
 
-struct FrameData {
-	VkCommandPool m_commandPool;
-	VkCommandBuffer m_mainCommandBuffer;
-	VkSemaphore m_presentSemaphore;
-	VkSemaphore m_renderSemaphore;
-	VkFence m_renderFence;
 
-	AllocatedBuffer sceneBuffer;
-	VkDescriptorSet sceneDescriptorSet;
-};
-
-struct MeshPushConstants {
-	glm::mat4 render_matrix; // MVP
-	glm::mat4 model_matrix;  // M
-};
 
 const std::vector<const char*>validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -93,6 +79,10 @@ class ErisEngine {
 	friend class ErisWorld;
 
 public:
+	enum class RenderPath {
+		Forward,
+		Lumen
+	};
 	ErisEngine()
 		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr), m_selectedObject(nullptr),
 		m_framebufferResized(false), m_isMousePressed(false)
@@ -139,6 +129,7 @@ private:
 
 	VkRenderPass m_renderPass;
 	VkRenderPass m_uiRenderPass;
+	VkRenderPass m_viewportPass;
 	std::vector<VkFramebuffer>m_frameBuffers;
 	FrameData m_frames[MAX_FRAMES_IN_FLIGHT];
 	uint32_t m_frameNumber;
@@ -197,6 +188,18 @@ private:
 	VkPipelineLayout m_shadowPipelineLayout;
 	VkExtent2D m_shadowExtent;
 
+	// Lumen
+	RenderPath m_activePath = RenderPath::Lumen;
+	VkPipeline m_lumenLightingPipeline;
+	VkPipelineLayout m_lumenLightingPipelineLayout;
+	VkDescriptorSetLayout m_lumenDescriptorLayout;
+	VkDescriptorSet m_lumenDescriptorSet;
+
+	// G-Buffer
+	GBuffer m_gbuffer;
+	VkPipeline m_lumenGbufferPipeline;
+	VkFramebuffer m_gbufferFramebuffer;
+	VkPipelineLayout m_lumenGbufferPipelineLayout;
 
 public:
 
@@ -208,7 +211,8 @@ public:
 	void initSyncStructures(); 
 	void initRenderPass();
 	void initUIRenderPass();
-	void initPipelines();
+	void initViewportPass();
+	void initForwardPipeline();
 	void initSkyboxPipeline();
 	void initGridPipeline();
 	void initShadowPipeline();
@@ -255,7 +259,7 @@ public:
 	void createDepthBuffer();
 	void createFramebuffers();
 	void createSceneBuffers();
-	void initSkyboxDescriptor();
+	void updateSkyboxDescriptor();
 
 
 	void initSkyboxMesh();
@@ -266,6 +270,8 @@ public:
 
 	FrameData& getCurrentFrame();
 	void drawFrame();
+	void drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
+	void drawLumenFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
 
 
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
@@ -280,6 +286,17 @@ public:
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData
 	);
+
+	// Lumen G-Buffer
+	void initGbuffer();
+
+	void updateLumenDescriptorSet();
+
+	void initLumenLightingPipeline();
+
+	void initLumenGbufferPipeline();
+
+
 
 	// ----------------------Non-rendering part------------------------
 
@@ -309,7 +326,19 @@ public:
 	// World functions
 
 	Model* getOrLoadModel(const std::string& path);
-	void drawWorld(VkCommandBuffer cmd, ErisWorld& world,bool isShadowPass);
+	void drawWorld(VkCommandBuffer cmd, ErisWorld& world);
+	void drawMainGeometry(VkCommandBuffer cmd,VkPipeline pipeline, VkPipelineLayout layout);
+	void drawSkybox(VkCommandBuffer cmd);
+	void drawShadow(VkCommandBuffer cmd);
+	void drawGrid(VkCommandBuffer cmd);
+	void drawLumenLighting(VkCommandBuffer cmd);
+	void executeLumenCompositionPass(VkCommandBuffer cmd);
+	void executeGBufferPass(VkCommandBuffer cmd);
+	void executeEditorUIPass(VkCommandBuffer cmd, uint32_t imageIndex);
+	void executeShadowPass(VkCommandBuffer cmd);
+	void executeForwardPass(VkCommandBuffer cmd);
+
+
 	RenderObject* pickObject(float mouseX, float mouseY);
 	ErisWorld* getActiveWorld() { return m_activeWorld; }
 

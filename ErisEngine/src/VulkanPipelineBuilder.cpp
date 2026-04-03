@@ -20,8 +20,9 @@ VkPipeline PipelineBuilder::buildPipeline(VkDevice device, VkRenderPass pass)
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &m_colorBlendAttachment;
+    colorBlending.logicOp = VK_LOGIC_OP_COPY;
+    colorBlending.attachmentCount = static_cast<uint32_t>(m_colorBlendAttachments.size());
+    colorBlending.pAttachments = m_colorBlendAttachments.data();
 
     // ≈‰÷√∂ØÃ¨◊¥Ã¨–≈œ¢
     VkPipelineDynamicStateCreateInfo dynamicState{};
@@ -50,7 +51,7 @@ VkPipeline PipelineBuilder::buildPipeline(VkDevice device, VkRenderPass pass)
 
     VkPipeline newPipeline;
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &newPipeline) != VK_SUCCESS) {
-        std::cout << "failed to create pipeline\n";
+        throw std::runtime_error("failed to build pipeline in vulkanpipeline builder!");
         return VK_NULL_HANDLE;
     }
     return newPipeline;

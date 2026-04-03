@@ -97,12 +97,12 @@ void ErisEditor::init(ErisEngine* engine) {
     init_info.DescriptorPool = m_imguiPool;
     init_info.MinImageCount = 3;
     init_info.ImageCount = 3;
-    init_info.PipelineInfoMain.RenderPass = engine->m_renderPass;
+    init_info.PipelineInfoMain.RenderPass = engine->m_uiRenderPass;
     init_info.PipelineInfoMain.Subpass = 0;
     init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
     // 如果开启了 Viewports，次级视口也需要配置（通常和主视口一致）
-    init_info.PipelineInfoForViewports.RenderPass = engine->m_renderPass;
+    init_info.PipelineInfoForViewports.RenderPass = engine->m_uiRenderPass;
     init_info.PipelineInfoForViewports.Subpass = 0;
     init_info.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
