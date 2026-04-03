@@ -69,7 +69,6 @@ int ErisEngine::Eris_init()
 
 	initDescriptors();
 	initDescriptorPool();
-	updateLumenDescriptorSet();
 
 	initForwardPipeline();
 	initLumenGbufferPipeline();
@@ -88,6 +87,7 @@ int ErisEngine::Eris_init()
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
 	updateSkyboxDescriptor();
+	updateLumenDescriptorSet();
 
 	m_editor = new ErisEditor();
 	m_editor->init(this);
@@ -232,6 +232,8 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	VkDeviceSize layerSize = width * height * 4;
 	VkDeviceSize totalSize = layerSize * 6;
 
+	uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
 	VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB; 
 	VkExtent3D imageExtent;
 	imageExtent.width = static_cast<uint32_t>(width);
@@ -242,10 +244,10 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	AllocatedBuffer stagingbuffer = createBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	void* data;
 	vmaMapMemory(m_allocator, stagingbuffer.allocation, &data);
-	for (int i = 0; i < 6; i++) {
-		memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
-		stbi_image_free(pixels[i]);
-	}
+		for (int i = 0; i < 6; i++) {
+			memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
+			stbi_image_free(pixels[i]);
+		}
 	vmaUnmapMemory(m_allocator, stagingbuffer.allocation);
 
 	// 3. 创建 GPU Image (关键：arrayLayers = 6, flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
@@ -254,12 +256,12 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	imgInfo.imageType = VK_IMAGE_TYPE_2D;
 	imgInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
 	imgInfo.extent = imageExtent;
-	imgInfo.mipLevels = 1;
-	imgInfo.arrayLayers = 6; // 6层
+	imgInfo.mipLevels = mipLevels;
+	imgInfo.arrayLayers = 6;
 	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT; // 标记为立方体贴图
+	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
 
 	VmaAllocationCreateInfo vmaAllocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
@@ -267,24 +269,64 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 
 	
 	immediateSubmit([&](VkCommandBuffer cmd) {
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,6);
+		transitionImageLayout(cmd, newImage.image, imageFormat,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			6, mipLevels, 0);
 
-		std::vector<VkBufferImageCopy>regions{};
-		 
+		std::vector<VkBufferImageCopy> regions(6);
 		for (uint32_t i = 0; i < 6; i++) {
-			VkBufferImageCopy region{};
-			region.bufferOffset = layerSize * i;
-			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			region.imageSubresource.mipLevel = 0;
-			region.imageSubresource.baseArrayLayer = i;
-			region.imageSubresource.layerCount = 1;
-			region.imageExtent = imageExtent;
-			regions.push_back(region);
+			regions[i].bufferOffset = layerSize * i;
+			regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			regions[i].imageSubresource.mipLevel = 0;
+			regions[i].imageSubresource.baseArrayLayer = i;
+			regions[i].imageSubresource.layerCount = 1;
+			regions[i].imageExtent = imageExtent;
 		}
 
 		vkCmdCopyBufferToImage(cmd, stagingbuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions.data());
 
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6);
+		// C. 循环生成 Mipmaps
+		int32_t mipWidth = width;
+		int32_t mipHeight = height;
+
+		for (uint32_t i = 1; i < mipLevels; i++) {
+			// 1. 将上一层 (i-1) 从 DST 转为 SRC 供采样读取
+			// layerCount=6, mipLevels=1, baseMipLevel=i-1
+			transitionImageLayout(cmd, newImage.image, imageFormat,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				6, 1, i - 1);
+
+			// 2. 执行 Blit (6 个面一起压缩)
+			VkImageBlit blit{};
+			blit.srcOffsets[0] = { 0, 0, 0 };
+			blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+			blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.srcSubresource.mipLevel = i - 1;
+			blit.srcSubresource.baseArrayLayer = 0;
+			blit.srcSubresource.layerCount = 6;
+
+			blit.dstOffsets[0] = { 0, 0, 0 };
+			blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 };
+			blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.dstSubresource.mipLevel = i;
+			blit.dstSubresource.baseArrayLayer = 0;
+			blit.dstSubresource.layerCount = 6;
+
+			vkCmdBlitImage(cmd, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+			// 3. 上一层 (i-1) 已经用完，正式将其转为最终的 Shader 可读状态
+			transitionImageLayout(cmd, newImage.image, imageFormat,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				6, 1, i - 1);
+
+			if (mipWidth > 1) mipWidth /= 2;
+			if (mipHeight > 1) mipHeight /= 2;
+		}
+
+		// D. 将最后一次生成的最小 Mip 层转为 Shader 可读
+		transitionImageLayout(cmd, newImage.image, imageFormat,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			6, 1, mipLevels - 1);
 		});
 
 
@@ -292,8 +334,8 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	viewInfo.image = newImage.image;
 	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-	viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-	viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+	viewInfo.format = imageFormat;
+	viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 6 };
 	vkCreateImageView(m_device, &viewInfo, nullptr, &newImage.imageView);
 
 	m_mainDeletionQueue.push_function([=]() {
@@ -1828,9 +1870,17 @@ void ErisEngine::initDescriptors() {
 	// Binding 2: Albedo + Roughness (Sampler2D)
 	lumenBinds.push_back({ 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr });
 
+	VkDescriptorSetLayoutBinding skyBind{};
+	skyBind.binding = 3;
+	skyBind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	skyBind.descriptorCount = 1;
+	skyBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	skyBind.pImmutableSamplers = nullptr;
+	lumenBinds.push_back(skyBind);
+
 
 	VkDescriptorSetLayoutCreateInfo lumenLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	lumenLayoutInfo.bindingCount = 3;
+	lumenLayoutInfo.bindingCount = static_cast<uint32_t>(lumenBinds.size());
 	lumenLayoutInfo.pBindings = lumenBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &lumenLayoutInfo, nullptr, &m_lumenDescriptorLayout);
 
@@ -1947,7 +1997,7 @@ void ErisEngine::initGbuffer()
 		m_gbuffer.position.imageView,
 		m_gbuffer.normal.imageView,
 		m_gbuffer.albedo.imageView,
-		m_depthImage.imageView // 复用原有的深度图
+		m_depthImage.imageView
 	};
 
 	VkFramebufferCreateInfo fbInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
@@ -1999,7 +2049,12 @@ void ErisEngine::updateLumenDescriptorSet()
 	albInfo.imageView = m_gbuffer.albedo.imageView;
 	albInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-	std::array<VkWriteDescriptorSet, 3> writes{};
+	VkDescriptorImageInfo skyInfo{};
+	skyInfo.sampler = m_skyboxSampler; // 使用你初始化好的天空盒采样器
+	skyInfo.imageView = m_skyboxImage.imageView;
+	skyInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	std::array<VkWriteDescriptorSet, 4> writes{};
 
 	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	writes[0].dstSet = m_lumenDescriptorSet;
@@ -2021,6 +2076,13 @@ void ErisEngine::updateLumenDescriptorSet()
 	writes[2].descriptorCount = 1;
 	writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	writes[2].pImageInfo = &albInfo;
+
+	writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[3].dstSet = m_lumenDescriptorSet;
+	writes[3].dstBinding = 3;
+	writes[3].descriptorCount = 1;
+	writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[3].pImageInfo = &skyInfo;
 
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
@@ -2246,14 +2308,14 @@ void ErisEngine::executeShadowPass(VkCommandBuffer cmd) {
 	// --- 3. 显式同步：阴影写完后转为 Shader 可读 ---
 	transitionImageLayout(cmd, m_shadowImage.image, m_depthFormat,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
 }
 
 void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// --- 1. 同步：将视口图从“读取”转为“写入”状态 ---
 	transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1);
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1,1,0);
 
 	// --- 2. 配置清除值 (1个背景色 + 1个深度) ---
 	std::array<VkClearValue, 2> clears{};
@@ -2297,7 +2359,7 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// (因为 m_viewportPass 的 finalLayout 已经配置好了，此处无需手动转换)
 	transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1);
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1,1,0);
 }
 
 void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t imageIndex)
@@ -2311,9 +2373,9 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 	// 【PASS 1: Geometry Pass - 填充 GBuffer】
 	// ---------------------------------------------------------
 	executeGBufferPass(cmd);
-	transitionImageLayout(cmd, m_gbuffer.position.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
-	transitionImageLayout(cmd, m_gbuffer.normal.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
-	transitionImageLayout(cmd, m_gbuffer.albedo.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
+	transitionImageLayout(cmd, m_gbuffer.position.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
+	transitionImageLayout(cmd, m_gbuffer.normal.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
+	transitionImageLayout(cmd, m_gbuffer.albedo.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
 	// ---------------------------------------------------------
 	// 【PASS 2: Lighting Pass - 最终光照与 Lumen 计算】
 	// ---------------------------------------------------------
@@ -2446,7 +2508,7 @@ void ErisEngine::drawFrame()
 	m_frameNumber++;
 }
 
-void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,uint32_t layerCount) {
+void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t layerCount, uint32_t mipLevels, uint32_t baseMipLevel) {
 	VkImageMemoryBarrier barrier{};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.pNext = nullptr;
@@ -2456,8 +2518,8 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = image;
 
-	barrier.subresourceRange.baseMipLevel = 0;
-	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.baseMipLevel = baseMipLevel;
+	barrier.subresourceRange.levelCount = mipLevels;
 	barrier.subresourceRange.baseArrayLayer = 0;
 	barrier.subresourceRange.layerCount = layerCount;
 
@@ -2498,7 +2560,7 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
     }
     // 【整合】：阴影贴图同步 (写入深度 -> 片元着色器读取)
     else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        // 这是专门针对阴影 Pass 结束后的显式同步屏障
+        // 这是专门针对阴影 Pass 结束后的显式同步屏障 
         barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         sourceStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -2512,6 +2574,18 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
         sourceStage = (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     }
+	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
     else {
         throw std::invalid_argument("unsupported layout transition!");
     }

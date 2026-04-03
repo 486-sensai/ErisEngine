@@ -277,7 +277,9 @@ public:
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 	VkDescriptorSet createDescriptorSet(AllocatedImage& img);
-	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,uint32_t layerCount);
+
+	void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,
+		uint32_t layerCount = 1, uint32_t mipLevels = 1, uint32_t baseMipLevel = 0);
 
 
 	static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
