@@ -268,11 +268,35 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 - 无日志框架，直接使用 `std::cerr`（错误/校验消息）和 `std::cout`（调试信息）。
 - 新增代码同理，无需引入日志库。
 
-### 6.4 构建系统
+### 6.4 构建系统与依赖版本
 
-- 主构建文件：`ErisEngine.vcxproj`（Visual Studio）。
-- 辅构建文件：`CMakeLists.txt`（可能不完整）。
-- C++ 标准：C++17。
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| **Vulkan SDK** | **1.4.335.0** | SDK 版本。引擎**当前请求 Vulkan 1.0 API**，开发中需逐步升级至 Vulkan 1.4。 |
+| **Vulkan API 版本** | `VK_API_VERSION_1_0` → **目标 1.4** | `appInfo.apiVersion` 和 `allocatorInfo.vulkanApiVersion` 当前为 1.0，需改为 `VK_API_VERSION_1_4` 以启用 1.4 特性。 |
+| **Vulkan 头文件** | `vulkan_core.h` 1.4.335 | `VK_HEADER_VERSION_COMPLETE = VK_MAKE_API_VERSION(0, 1, 4, 335)` |
+| **VMA (Vulkan Memory Allocator)** | 3.3.0 | 位于 SDK 内 `vma/vk_mem_alloc.h` |
+| **volk** | 最新 (zeux/volk) | Vulkan 动态加载，位于 `Volk/volk.h` |
+| **GLFW** | 3.4 | `glfw-3.4.bin.WIN64`，静态链接 `glfw3.lib` |
+| **GLM** | 1.0.2 | 随 Vulkan SDK 分发 |
+| **Jolt Physics** | 5.5.1 | 静态链接 `Jolt.lib` |
+| **ImGui** | 1.92.7 WIP | docking 分支 |
+| **ImGuizmo** | 最新 (master) | 集成于 ImGui 上层 |
+| **Assimp** | 3.0.0 | NuGet 包导入 (`Assimp.redist.3.0.0`) |
+| **stb_image** | 最新 (单文件) | 用于纹理加载 |
+
+**构建工具链**：
+
+| 工具 | 版本 |
+|------|------|
+| **Visual Studio** | 2022 (Platform Toolset v143) |
+| **Windows SDK** | 10.0 |
+| **C++ 标准** | C++17 (`stdcpp17`) |
+| **CMake** | ≥ 3.15（辅构建系统） |
+| **glslangValidator** | 随 Vulkan SDK 分发（着色器离线编译） |
+
+**主构建文件**：`ErisEngine.vcxproj`（Visual Studio）
+**辅构建文件**：`CMakeLists.txt`（可能不完整，以 vcxproj 为准）
 
 ---
 
