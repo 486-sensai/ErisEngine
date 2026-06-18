@@ -2090,6 +2090,14 @@ void ErisEngine::initDescriptors() {
 	lumenBinds.push_back(skyBind);
 
 
+	VkDescriptorSetLayoutBinding brdfBind{};
+	brdfBind.binding = 4;
+	brdfBind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	brdfBind.descriptorCount = 1;
+	brdfBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	brdfBind.pImmutableSamplers = nullptr;
+	lumenBinds.push_back(brdfBind);
+
 	VkDescriptorSetLayoutCreateInfo lumenLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	lumenLayoutInfo.bindingCount = static_cast<uint32_t>(lumenBinds.size());
 	lumenLayoutInfo.pBindings = lumenBinds.data();
@@ -2265,7 +2273,12 @@ void ErisEngine::updateLumenDescriptorSet()
 	skyInfo.imageView = m_skyboxImage.imageView;
 	skyInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-	std::array<VkWriteDescriptorSet, 4> writes{};
+	VkDescriptorImageInfo brdfInfo{};
+	brdfInfo.sampler = m_sampler;
+	brdfInfo.imageView = m_brdfImageView;
+	brdfInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	std::array<VkWriteDescriptorSet, 5> writes{};
 
 	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	writes[0].dstSet = m_lumenDescriptorSet;
@@ -2294,6 +2307,13 @@ void ErisEngine::updateLumenDescriptorSet()
 	writes[3].descriptorCount = 1;
 	writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	writes[3].pImageInfo = &skyInfo;
+
+	writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[4].dstSet = m_lumenDescriptorSet;
+	writes[4].dstBinding = 4;
+	writes[4].descriptorCount = 1;
+	writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[4].pImageInfo = &brdfInfo;
 
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }

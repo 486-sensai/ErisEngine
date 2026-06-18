@@ -30,6 +30,7 @@ layout(set = 1, binding = 1) uniform sampler2D gNormal;
 layout(set = 1, binding = 2) uniform sampler2D gAlbedo; 
 // 新增：天空盒，用于 IBL
 layout(set = 1, binding = 3) uniform samplerCube skyboxMap; 
+layout(set = 1, binding = 4) uniform sampler2D brdfLUT;
 
 const float PI = 3.14159265359;
 
@@ -216,7 +217,8 @@ void main() {
     // B. 高光 IBL (反射天空)
     const float MAX_REF_LOD = 8.0; 
     vec3 prefilteredColor = textureLod(skyboxMap, R, roughness * MAX_REF_LOD).rgb;
-    vec2 envBRDF = EnvBRDFApprox(roughness, max(dot(N, V), 0.0));
+    // vec2 envBRDF = EnvBRDFApprox(roughness, max(dot(N, V), 0.0));
+    vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N,V), 0.0), roughness)).rg;
     vec3 specularIBL = prefilteredColor * (F_ibl * envBRDF.x + envBRDF.y);
 
     // --- 3. 屏幕空间反射 (SSR) ---
