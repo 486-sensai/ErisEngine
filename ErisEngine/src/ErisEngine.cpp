@@ -1,4 +1,5 @@
 #include "ErisEngine.h"
+#include "LayoutTransition.h"
 
 glm::mat4 aiMatrix4x4ToGlm(const aiMatrix4x4& from) {
 	glm::mat4 to;
@@ -910,12 +911,7 @@ void ErisEngine::initShadowResources()
 	vkCreateFramebuffer(m_device, &fbInfo, nullptr, &m_shadowFrameBuffer);
 
 	// 5. 注册销毁
-	m_mainDeletionQueue.push_function([=]() {
-		vkDestroyFramebuffer(m_device, m_shadowFrameBuffer, nullptr);
-		vkDestroyRenderPass(m_device, m_shadowRenderPass, nullptr);
-		vkDestroyImageView(m_device, m_shadowImage.imageView, nullptr);
-		vmaDestroyImage(m_allocator, m_shadowImage.image, m_shadowImage.allocation);
-		});
+	// cleanup moved to cleanSwapchain()
 }
 
 void ErisEngine::initShadowPipeline()
@@ -1079,6 +1075,28 @@ void ErisEngine:: cleanSwapchain()
 		vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
 		m_swapchain = VK_NULL_HANDLE;
 	}
+
+	// GBuffer
+	if (m_gbufferFramebuffer != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(m_device, m_gbufferFramebuffer, nullptr);
+		m_gbufferFramebuffer = VK_NULL_HANDLE;
+	}
+	vkDestroyImageView(m_device, m_gbuffer.position.imageView, nullptr);
+	vmaDestroyImage(m_allocator, m_gbuffer.position.image, m_gbuffer.position.allocation);
+	vkDestroyImageView(m_device, m_gbuffer.normal.imageView, nullptr);
+	vmaDestroyImage(m_allocator, m_gbuffer.normal.image, m_gbuffer.normal.allocation);
+	vkDestroyImageView(m_device, m_gbuffer.albedo.imageView, nullptr);
+	vmaDestroyImage(m_allocator, m_gbuffer.albedo.image, m_gbuffer.albedo.allocation);
+	m_gbuffer = {};
+
+	// Shadow
+	vkDestroyFramebuffer(m_device, m_shadowFrameBuffer, nullptr);
+	m_shadowFrameBuffer = VK_NULL_HANDLE;
+	vkDestroyRenderPass(m_device, m_shadowRenderPass, nullptr);
+	m_shadowRenderPass = VK_NULL_HANDLE;
+	vkDestroyImageView(m_device, m_shadowImage.imageView, nullptr);
+	vmaDestroyImage(m_allocator, m_shadowImage.image, m_shadowImage.allocation);
+	m_shadowImage = {};
 }
 
 void ErisEngine::initVulkan()
@@ -2524,73 +2542,14 @@ void ErisEngine::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkFor
 	barrier.subresourceRange.layerCount = layerCount;
 
 
-	if (format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT) {
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	}
-	else {
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	}
+	barrier.subresourceRange.aspectMask = GetAspectMask(format);
 
-	VkPipelineStageFlags sourceStage;
-	VkPipelineStageFlags destinationStage;
+	auto srcInfo = GetSrcAccessForLayout(oldLayout);
+	auto dstInfo = GetDstAccessForLayout(newLayout);
+	barrier.srcAccessMask = srcInfo.access;
+	barrier.dstAccessMask = dstInfo.access;
 
-	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    }
-	else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		barrier.srcAccessMask = 0;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-	}
-    else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    // 【整合】：阴影贴图同步 (写入深度 -> 片元着色器读取)
-    else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        // 这是专门针对阴影 Pass 结束后的显式同步屏障 
-        barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        sourceStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    else if ((oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL || oldLayout == VK_IMAGE_LAYOUT_UNDEFINED)
-        && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) 
-    {
-        barrier.srcAccessMask = (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) ? 0 : VK_ACCESS_SHADER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        sourceStage = (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    }
-	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-	}
-	else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-	}
-    else {
-        throw std::invalid_argument("unsupported layout transition!");
-    }
-
-	vkCmdPipelineBarrier(cmd, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+	vkCmdPipelineBarrier(cmd, srcInfo.stage, dstInfo.stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
 
@@ -2687,6 +2646,9 @@ void ErisEngine::initViewportResources()
 		transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
 			VK_IMAGE_LAYOUT_UNDEFINED,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
+			transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
+				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,1);
 		}); 
 
 	if (m_viewportTextureSet != VK_NULL_HANDLE) {
@@ -3360,6 +3322,8 @@ void ErisEngine::drawMainGeometry(VkCommandBuffer cmd, VkPipeline pipeline, VkPi
 
 		for (auto& mesh : obj.m_pModel->meshes) {
 			// 绑定材质贴图 (Set 1)
+			if (mesh.vertices.empty() || mesh.indices.empty()) continue;
+
 			VkDescriptorSet texSet = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
 				? mesh.material->textureSet : m_defaultTextureSet;
 			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &texSet, 0, nullptr);
@@ -3439,6 +3403,7 @@ void ErisEngine::drawShadow(VkCommandBuffer cmd)
 		vkCmdPushConstants(cmd, m_shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPushConstants), &constants);
 
 		for (auto& mesh : obj.m_pModel->meshes) {
+			if (mesh.vertices.empty() || mesh.indices.empty()) continue;
 			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer.buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);

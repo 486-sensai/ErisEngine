@@ -102,7 +102,7 @@ vec3 CalculateSSGI(vec3 P, vec3 N, vec3 albedo) {
         
         vec3 radiance = nAlbedo * (nEmission * 5.0 + 0.2) * cosTheta * cosPhi * attenuation;
         indirectLight += radiance;
-    }
+    }   
     return (indirectLight / float(SAMPLES)) * albedo;
 }
 
@@ -178,10 +178,11 @@ void main() {
     vec3 L_sun = normalize(scene.sunlightDir.xyz);
     vec3 H_sun = normalize(V + L_sun);
     float NDF_s = DistributionGGX(N, H_sun, roughness);
-    float G_s = GeometrySmith(N, V, L_sun, roughness);
+    float G_s = GeometrySmith(N, V, L_sun, roughness);  
     vec3 F_s = fresnelSchlick(max(dot(H_sun, V), 0.0), F0);
     vec3 spec_s = (NDF_s * G_s * F_s) / (4.0 * max(dot(N, V), 0.0) * max(dot(N, L_sun), 0.0) + 0.0001);
     vec3 kD_s = (vec3(1.0) - F_s) * (1.0 - metallic);
+    // PBR ว๓นโ
     Lo += (1.0 - shadow) * (kD_s * albedo / PI + spec_s) * scene.sunlightColor.rgb * scene.sunlightColor.a * max(dot(N, L_sun), 0.0);
 
     for(int i = 0; i < scene.lightCount; i++) {

@@ -14,7 +14,7 @@ layout(push_constant) uniform constants {
     vec4 materialParams; // x: roughness, y: metallic, z: emission
 } PushConstants;
 
-// MRT 输出
+// MRT 输出 （一次性输出 好几张图（位置、法线、颜色、金属度、粗糙度…）
 layout(location = 0) out vec4 outPosition; // RGB: Pos, A: Emission
 layout(location = 1) out vec4 outNormal;   // RGB: Normal, A: Metallic
 layout(location = 2) out vec4 outAlbedo;   // RGB: Albedo, A: Roughness
