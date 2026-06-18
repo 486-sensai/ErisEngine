@@ -272,8 +272,8 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| **Vulkan SDK** | **1.4.335.0** | SDK 版本。引擎**当前请求 Vulkan 1.0 API**，开发中需逐步升级至 Vulkan 1.4。 |
-| **Vulkan API 版本** | `VK_API_VERSION_1_0` → **目标 1.4** | `appInfo.apiVersion` 和 `allocatorInfo.vulkanApiVersion` 当前为 1.0，需改为 `VK_API_VERSION_1_4` 以启用 1.4 特性。 |
+| **Vulkan SDK** | **1.4.335.0** | SDK 版本。 |
+| **Vulkan API 版本** | `VK_API_VERSION_1_4` | 已升级。`appInfo.apiVersion` 和 `allocatorInfo.vulkanApiVersion`均使用 1.4。 |
 | **Vulkan 头文件** | `vulkan_core.h` 1.4.335 | `VK_HEADER_VERSION_COMPLETE = VK_MAKE_API_VERSION(0, 1, 4, 335)` |
 | **VMA (Vulkan Memory Allocator)** | 3.3.0 | 位于 SDK 内 `vma/vk_mem_alloc.h` |
 | **volk** | 最新 (zeux/volk) | Vulkan 动态加载，位于 `Volk/volk.h` |
