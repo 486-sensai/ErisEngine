@@ -148,6 +148,7 @@ private:
 	VkDescriptorSet m_defaultTextureSet; // 1x1 白图对应的描述符集
 
 	AllocatedImage m_skyboxImage;
+	VkImageView m_brdfImageView;
 	VkDescriptorSet m_skyboxDescriptorSet;
 	VkDescriptorSetLayout m_skyboxDescriptorSetLayout;
 	VkPipeline m_skyboxPipeline;
@@ -313,6 +314,8 @@ public:
 	AllocatedImage loadCubemap(const std::vector<std::string>& faces);
 
 	AllocatedImage loadHDRCubemap(const std::vector<std::string>& faces);
+
+	VkImage loadBRDFLUT(VkImageView* outView);
 
 	void initDefaultResources();
 

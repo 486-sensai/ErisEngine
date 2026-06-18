@@ -88,7 +88,10 @@ int ErisEngine::Eris_init()
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
 	updateSkyboxDescriptor();
-	updateLumenDescriptorSet();
+	updateLumenDescriptorSet();	
+	
+	// Load BRDF LUT
+	loadBRDFLUT(&m_brdfImageView);
 
 	m_editor = new ErisEditor();
 	m_editor->init(this);
@@ -471,6 +474,70 @@ AllocatedImage ErisEngine::loadHDRCubemap(const std::vector<std::string>& faces)
 		});
 
 	return newImage;
+}
+
+VkImage ErisEngine::loadBRDFLUT(VkImageView* outView)
+{
+	const int lutSize = 256;
+	VkDeviceSize dataSize = lutSize * lutSize * 4; // R16G16 = 4 bytes/texel
+
+	std::ifstream file("assets/ibl/brdf_lut.bin", std::ios::binary);
+	if (!file) throw std::runtime_error("Failed to load BRDF LUT!");
+	void* pixelData = new char[dataSize];
+	file.read(static_cast<char*>(pixelData), dataSize);
+	file.close();
+
+	AllocatedBuffer stagingBuffer = createBuffer(dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	void* mapped;
+	vmaMapMemory(m_allocator, stagingBuffer.allocation, &mapped);
+	memcpy(mapped, pixelData, dataSize);
+	vmaUnmapMemory(m_allocator, stagingBuffer.allocation);
+	delete[] pixelData;
+
+	VkImage image;
+	VmaAllocation allocation;
+	VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = VK_FORMAT_R16G16_SFLOAT;
+	imgInfo.extent = { (uint32_t)lutSize, (uint32_t)lutSize, 1 };
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &image, &allocation, nullptr);
+
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		VkBufferImageCopy region{};
+		region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		region.imageExtent = { (uint32_t)lutSize, (uint32_t)lutSize, 1 };
+
+		transitionImageLayout(cmd, image, VK_FORMAT_R16G16_SFLOAT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, 1, 0);
+		vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+		transitionImageLayout(cmd, image, VK_FORMAT_R16G16_SFLOAT,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			1, 1, 0);
+		});
+
+	VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	viewInfo.image = image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = VK_FORMAT_R16G16_SFLOAT;
+	viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	vkCreateImageView(m_device, &viewInfo, nullptr, outView);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, *outView, nullptr);
+		vmaDestroyImage(m_allocator, image, allocation);
+		});
+
+	vmaDestroyBuffer(m_allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+	return image;
 }
 
 void ErisEngine::createSwapchain()
