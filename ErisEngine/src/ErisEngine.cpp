@@ -81,6 +81,8 @@ int ErisEngine::Eris_init()
 	initShadowPipeline();
 	createSceneBuffers();
 	initSkyboxMesh();
+	// Load BRDF LUT
+	loadBRDFLUT(&m_brdfImageView);
 
 	m_activeWorld = new ErisWorld();
 	m_activeWorld->getPhysics().createInfinitePlane();
@@ -90,8 +92,6 @@ int ErisEngine::Eris_init()
 	updateSkyboxDescriptor();
 	updateLumenDescriptorSet();	
 	
-	// Load BRDF LUT
-	loadBRDFLUT(&m_brdfImageView);
 
 	m_editor = new ErisEditor();
 	m_editor->init(this);
@@ -536,7 +536,6 @@ VkImage ErisEngine::loadBRDFLUT(VkImageView* outView)
 		vmaDestroyImage(m_allocator, image, allocation);
 		});
 
-	vmaDestroyBuffer(m_allocator, stagingBuffer.buffer, stagingBuffer.allocation);
 	return image;
 }
 
