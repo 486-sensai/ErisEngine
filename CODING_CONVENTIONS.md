@@ -308,7 +308,7 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 
 #### 阶段三：工作总结
 
-功能落地后，在 `ErisEngine Tutorial\` 中对应文件的**末尾追加工作总结**：
+功能落地后，在 `ErisEngine Worklog\` 目录中创建工作总结文档（.md），命名格式为 `XX-功能名.md`，内容包含：
 
 ```
 ---
@@ -341,7 +341,11 @@ D:\Users\Alice486\source\repos\ErisEngine\
 │   └── CODING_CONVENTIONS.md   # 本文件
 ├── ErisEngine Plans\           # 方案规划文档（在 git 之外）
 │   └── README.md               # 路线图总览
-└── ErisEngine Tutorial\        # 实现步骤 + 工作总结（在 git 之外）
+├── ErisEngine Tutorial\        # 实现步骤（在 git 之外）
+│   ├── 01-IBL.md
+│   ├── 02-HBAO.md
+│   └── ...
+└── ErisEngine Worklog\         # 工作总结（在 git 之外）
     ├── 01-IBL.md
     ├── 02-HBAO.md
     └── ...
