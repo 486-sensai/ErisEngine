@@ -347,6 +347,132 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	return newImage;
 }
 
+AllocatedImage ErisEngine::loadHDRCubemap(const std::vector<std::string>& faces)
+{
+	if (faces.size() != 6) {
+		throw std::runtime_error("Cubemap must have exactly 6 faces!");
+	}
+
+	int width, height, channels;
+	std::vector<float*> pixels(6);
+
+	// 加载 6 张 HDR 图
+	for (int i = 0; i < 6; i++) {
+		pixels[i] = stbi_loadf(faces[i].c_str(), &width, &height, &channels, STBI_rgb_alpha);
+		if (!pixels[i])throw std::runtime_error("failed to load HDR cubemap face!");
+	}
+
+	VkDeviceSize layerSize = width * height * 4 * sizeof(float);
+	VkDeviceSize totalSize = layerSize * 6;
+
+	uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
+	VkFormat imageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+	VkExtent3D imageExtent;
+	imageExtent.width = static_cast<uint32_t>(width);
+	imageExtent.height = static_cast<uint32_t>(height);
+	imageExtent.depth = 1;
+
+	// 创建 Staging Buffer
+	AllocatedBuffer stagingbuffer = createBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	
+	void* data;
+	vmaMapMemory(m_allocator, stagingbuffer.allocation, &data);
+	for (int i = 0; i < 6; i++) {
+		memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
+		stbi_image_free(pixels[i]);
+	}
+	vmaUnmapMemory(m_allocator, stagingbuffer.allocation);
+
+	// 创建 GPU Image
+	AllocatedImage newImage;
+	VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = imageFormat;
+	imgInfo.extent = imageExtent;
+	imgInfo.mipLevels = mipLevels;
+	imgInfo.arrayLayers = 6;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+	VmaAllocationCreateInfo vmaAllocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &vmaAllocInfo, &newImage.image, &newImage.allocation, nullptr);
+
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		transitionImageLayout(cmd, newImage.image, imageFormat,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			6, mipLevels, 0);
+
+		std::vector<VkBufferImageCopy> regions(6);
+		for (uint32_t i = 0; i < 6; i++) {
+			regions[i].bufferOffset = layerSize * i;
+			regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			regions[i].imageSubresource.mipLevel = 0;
+			regions[i].imageSubresource.baseArrayLayer = i;
+			regions[i].imageSubresource.layerCount = 1;
+			regions[i].imageExtent = imageExtent;
+		}
+
+		vkCmdCopyBufferToImage(cmd, stagingbuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions.data());
+
+		// 循环生成 Mipmaps
+		int32_t mipWidth = width;
+		int32_t mipHeight = height;
+
+		for (uint32_t i = 1; i < mipLevels; i++) {
+			transitionImageLayout(cmd, newImage.image, imageFormat,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				6, 1, i - 1);
+
+			VkImageBlit blit{};
+			blit.srcOffsets[0] = { 0, 0, 0 };
+			blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+			blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.srcSubresource.mipLevel = i - 1;
+			blit.srcSubresource.baseArrayLayer = 0;
+			blit.srcSubresource.layerCount = 6;
+
+			blit.dstOffsets[0] = { 0, 0, 0 };
+			blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 };
+			blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.dstSubresource.mipLevel = i;
+			blit.dstSubresource.baseArrayLayer = 0;
+			blit.dstSubresource.layerCount = 6;
+
+			vkCmdBlitImage(cmd, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+			transitionImageLayout(cmd, newImage.image, imageFormat,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				6, 1, i - 1);
+
+			if (mipWidth > 1) mipWidth /= 2;
+			if (mipHeight > 1) mipHeight /= 2;
+		}
+
+		transitionImageLayout(cmd, newImage.image, imageFormat,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			6, 1, mipLevels - 1);
+		});
+
+	// 创建 ImageView
+	VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	viewInfo.image = newImage.image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+	viewInfo.format = imageFormat;
+	viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 6 };
+	vkCreateImageView(m_device, &viewInfo, nullptr, &newImage.imageView);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, newImage.imageView, nullptr);
+		vmaDestroyImage(m_allocator, newImage.image, newImage.allocation);
+		});
+
+	return newImage;
+}
+
 void ErisEngine::createSwapchain()
 {
 	SwapChainSupportDetails swapchainSupport = querySwapChainSupport(m_physicalDevice);

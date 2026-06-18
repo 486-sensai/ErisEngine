@@ -312,6 +312,8 @@ public:
 
 	AllocatedImage loadCubemap(const std::vector<std::string>& faces);
 
+	AllocatedImage loadHDRCubemap(const std::vector<std::string>& faces);
+
 	void initDefaultResources();
 
 	void initSceneData();
