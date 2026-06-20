@@ -104,6 +104,8 @@ private:
 	VkRect2D m_scissor;
 	double m_lastX, m_lastY;
 
+	RenderPath m_activePath = RenderPath::Forward;
+
 	// vulkan core
 	VkInstance m_instance;
 	VkDebugUtilsMessengerEXT m_debugMessenger;
@@ -149,6 +151,8 @@ private:
 	VkDescriptorSet m_defaultTextureSet; // 1x1 白图对应的描述符集
 
 	AllocatedImage m_skyboxImage;
+	AllocatedImage m_irradianceMap;
+	AllocatedImage m_prefilteredMap;
 	VkImageView m_brdfImageView;
 	VkDescriptorSetLayout m_iblDescriptorSetLayout;
 	VkDescriptorSet m_iblDescriptorSet;
@@ -193,7 +197,6 @@ private:
 	VkExtent2D m_shadowExtent;
 
 	// Lumen
-	RenderPath m_activePath = RenderPath::Forward;
 	VkPipeline m_lumenLightingPipeline;
 	VkPipelineLayout m_lumenLightingPipelineLayout;
 	VkDescriptorSetLayout m_lumenDescriptorLayout;
@@ -320,6 +323,8 @@ public:
 	AllocatedImage loadHDRCubemap(const std::vector<std::string>& faces);
 
 	VkImage loadBRDFLUT(VkImageView* outView);
+
+	void loadPrefilteredMap();
 
 	void updateForwardIBLDescriptorSet();
 

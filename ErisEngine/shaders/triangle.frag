@@ -29,6 +29,8 @@ layout(set = 0, binding = 1) uniform sampler2D shadowMap;
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 layout(set = 2, binding = 0) uniform samplerCube skyboxMap;
 layout(set = 2, binding = 1) uniform sampler2D brdfLUT;
+layout(set = 2, binding = 2) uniform samplerCube irradianceMap;
+layout(set = 2, binding = 3) uniform samplerCube prefilteredMap;
 
 layout(location = 0) out vec4 outFragColor;
 
@@ -167,12 +169,14 @@ void main() {
     vec3 F_ibl = fresnelSchlick(max(dot(N_ibl, V_ibl), 0.0), F0_ibl);
     vec3 kD_ibl = (vec3(1.0) - F_ibl) * (1.0 - metallic);
 
-    vec3 irradiance = textureLod(skyboxMap, N_ibl, 8.0).rgb;
+    // vec3 irradiance = textureLod(skyboxMap, N_ibl, 8.0).rgb;
+    vec3 irradiance = texture(irradianceMap, N_ibl).rgb;
     vec3 diffuseIBL = irradiance * albedo;
     
     // IBL specular
     vec3 R_ibl = reflect(-V_ibl, N_ibl);
-    vec3 prefilteredColor = textureLod(skyboxMap, R_ibl, 0.0).rgb;
+    // vec3 prefilteredColor = textureLod(skyboxMap, R_ibl, 0.0).rgb;
+    vec3 prefilteredColor = textureLod(prefilteredMap, R_ibl, roughness * 5.0).rgb;
     vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N_ibl, V_ibl), 0.0), roughness)).rg;
     vec3 specularIBL = prefilteredColor * (F_ibl * envBRDF.x + envBRDF.y);
 
