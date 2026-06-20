@@ -30,6 +30,9 @@ layout(set = 1, binding = 1) uniform sampler2D gNormal;
 layout(set = 1, binding = 2) uniform sampler2D gAlbedo; 
 // 新增：天空盒，用于 IBL
 layout(set = 1, binding = 3) uniform samplerCube skyboxMap; 
+layout(set = 1, binding = 4) uniform sampler2D brdfLUT;
+layout(set = 1, binding = 5) uniform samplerCube irradianceMap;
+layout(set = 1, binding = 6) uniform samplerCube prefilteredMap;
 
 const float PI = 3.14159265359;
 
@@ -209,14 +212,22 @@ void main() {
     vec3 kD_ibl = (1.0 - F_ibl) * (1.0 - metallic);
 
     // A. 漫反射 IBL (环境光照明)
-    // 技巧：如果没有卷积贴图，通过极高的 LOD 模糊天空盒来近似 Irradiance Map
-    vec3 irradiance = textureLod(skyboxMap, N, 8.0).rgb; 
+    // unused: 技巧：如果没有卷积贴图，通过极高的 LOD 模糊天空盒来近似 Irradiance Map
+    // vec3 irradiance = textureLod(skyboxMap, N, 8.0).rgb; 
+    // using method : real IBL
+    vec3 irradiance = texture(irradianceMap, N).rgb;
+
     vec3 diffuseIBL = irradiance * albedo;
 
     // B. 高光 IBL (反射天空)
     const float MAX_REF_LOD = 8.0; 
-    vec3 prefilteredColor = textureLod(skyboxMap, R, roughness * MAX_REF_LOD).rgb;
-    vec2 envBRDF = EnvBRDFApprox(roughness, max(dot(N, V), 0.0));
+    // unreal lod prefilteredMap
+    // vec3 prefilteredColor = textureLod(skyboxMap, R, roughness * MAX_REF_LOD).rgb;
+    // real IBL prefilteredMap
+    vec3 prefilteredColor = textureLod(prefilteredMap, R, roughness * 5.0).rgb;
+
+    // vec2 envBRDF = EnvBRDFApprox(roughness, max(dot(N, V), 0.0));
+    vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N,V), 0.0), roughness)).rg;
     vec3 specularIBL = prefilteredColor * (F_ibl * envBRDF.x + envBRDF.y);
 
     // --- 3. 屏幕空间反射 (SSR) ---
