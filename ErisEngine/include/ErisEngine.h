@@ -130,6 +130,7 @@ private:
 	VkRenderPass m_renderPass;
 	VkRenderPass m_uiRenderPass;
 	VkRenderPass m_viewportPass;
+	VkRenderPass m_viewportForwardPass;
 	std::vector<VkFramebuffer>m_frameBuffers;
 	FrameData m_frames[MAX_FRAMES_IN_FLIGHT];
 	uint32_t m_frameNumber;
@@ -149,6 +150,8 @@ private:
 
 	AllocatedImage m_skyboxImage;
 	VkImageView m_brdfImageView;
+	VkDescriptorSetLayout m_iblDescriptorSetLayout;
+	VkDescriptorSet m_iblDescriptorSet;
 	VkDescriptorSet m_skyboxDescriptorSet;
 	VkDescriptorSetLayout m_skyboxDescriptorSetLayout;
 	VkPipeline m_skyboxPipeline;
@@ -190,7 +193,7 @@ private:
 	VkExtent2D m_shadowExtent;
 
 	// Lumen
-	RenderPath m_activePath = RenderPath::Lumen;
+	RenderPath m_activePath = RenderPath::Forward;
 	VkPipeline m_lumenLightingPipeline;
 	VkPipelineLayout m_lumenLightingPipelineLayout;
 	VkDescriptorSetLayout m_lumenDescriptorLayout;
@@ -213,6 +216,7 @@ public:
 	void initRenderPass();
 	void initUIRenderPass();
 	void initViewportPass();
+	void initViewportForwardPass();
 	void initForwardPipeline();
 	void initSkyboxPipeline();
 	void initGridPipeline();
@@ -316,6 +320,8 @@ public:
 	AllocatedImage loadHDRCubemap(const std::vector<std::string>& faces);
 
 	VkImage loadBRDFLUT(VkImageView* outView);
+
+	void updateForwardIBLDescriptorSet();
 
 	void initDefaultResources();
 

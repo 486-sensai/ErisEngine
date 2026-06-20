@@ -61,6 +61,7 @@ int ErisEngine::Eris_init()
 
 	initRenderPass();
 	initViewportPass();
+	initViewportForwardPass();
 	initUIRenderPass();
 	createFramebuffers();
 
@@ -90,7 +91,8 @@ int ErisEngine::Eris_init()
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
 	updateSkyboxDescriptor();
-	updateLumenDescriptorSet();	
+	updateLumenDescriptorSet();
+	updateForwardIBLDescriptorSet();
 	
 
 	m_editor = new ErisEditor();
@@ -809,7 +811,7 @@ void ErisEngine::initForwardPipeline()
 		throw std::runtime_error("failed to load shaders!");
 	}
 
-	std::array<VkDescriptorSetLayout, 2> layouts = { m_globalSetLayout,m_singleTextureLayout };
+	std::array<VkDescriptorSetLayout, 3> layouts = { m_globalSetLayout,m_singleTextureLayout,m_iblDescriptorSetLayout };
 
 	// 管线布局
 	VkPushConstantRange pushConstantRange;
@@ -819,7 +821,7 @@ void ErisEngine::initForwardPipeline()
 
 	VkPipelineLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	layoutInfo.setLayoutCount = 2;
+	layoutInfo.setLayoutCount = static_cast<uint32_t> (layouts.size());
 	layoutInfo.pSetLayouts = layouts.data();
 	layoutInfo.pushConstantRangeCount = 1;
 	layoutInfo.pPushConstantRanges = &pushConstantRange;
@@ -1586,6 +1588,59 @@ void ErisEngine::initViewportPass()
 		});
 }
 
+void ErisEngine::initViewportForwardPass()
+{
+	// 1. 颜色附件 (最终合成后的画面)
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = m_swapchainImageFormat;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	// 2. 深度附件
+	VkAttachmentDescription depthAttachment{};
+	depthAttachment.format = m_depthFormat;
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference colorRef{};
+	colorRef.attachment = 0;
+	colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthRef{};
+	depthRef.attachment = 1;
+	depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorRef;
+	subpass.pDepthStencilAttachment = &depthRef;
+
+	VkRenderPassCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+	createInfo.attachmentCount = 2;
+	createInfo.pAttachments = attachments.data();
+	createInfo.subpassCount = 1;
+	createInfo.pSubpasses = &subpass;
+
+	vkCreateRenderPass(m_device, &createInfo, nullptr, &m_viewportForwardPass);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyRenderPass(m_device, m_viewportForwardPass, nullptr);
+		});
+}
+
 bool ErisEngine:: checkValidationLayerSupport() 
 {
 	uint32_t layerCount;
@@ -2050,6 +2105,33 @@ void ErisEngine::initDescriptors() {
 		throw std::runtime_error("failed to create skybox descriptor set layout!");
 	}
 
+
+	// ---------------------------------------------------------
+	// 2.3 IBL 描述符布局 (Set 2) - skybox + BRDF LUT
+	// ---------------------------------------------------------
+	std::vector<VkDescriptorSetLayoutBinding> iblBinds;
+
+	VkDescriptorSetLayoutBinding iblSkyBinding{};
+	iblSkyBinding.binding = 0;
+	iblSkyBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	iblSkyBinding.descriptorCount = 1;
+	iblSkyBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	iblSkyBinding.pImmutableSamplers = nullptr;
+	iblBinds.push_back(iblSkyBinding);
+
+	VkDescriptorSetLayoutBinding iblBRDFBinding{};
+	iblBRDFBinding.binding = 1;
+	iblBRDFBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	iblBRDFBinding.descriptorCount = 1;
+	iblBRDFBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	iblBRDFBinding.pImmutableSamplers = nullptr;
+	iblBinds.push_back(iblBRDFBinding);
+
+	VkDescriptorSetLayoutCreateInfo iblLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	iblLayoutInfo.bindingCount = static_cast<uint32_t>(iblBinds.size());
+	iblLayoutInfo.pBindings = iblBinds.data();
+	vkCreateDescriptorSetLayout(m_device, &iblLayoutInfo, nullptr, &m_iblDescriptorSetLayout);
+
 	// 3. 创建采样器 (Sampler)
 	VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 	samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -2111,6 +2193,7 @@ void ErisEngine::initDescriptors() {
 		vkDestroyDescriptorSetLayout(m_device, m_singleTextureLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_skyboxDescriptorSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_lumenDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_iblDescriptorSetLayout, nullptr);
 		});
 }
 
@@ -2315,6 +2398,45 @@ void ErisEngine::updateLumenDescriptorSet()
 	writes[4].pImageInfo = &brdfInfo;
 
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+}
+
+void ErisEngine::updateForwardIBLDescriptorSet()
+{
+	// 分配 IBL 描述符集 (Set 2 for Forward)
+	VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	allocInfo.descriptorPool = m_descriptorPool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &m_iblDescriptorSetLayout;
+	vkAllocateDescriptorSets(m_device, &allocInfo, &m_iblDescriptorSet);
+
+	// Skybox cubemap
+	VkDescriptorImageInfo iblSkyInfo{};
+	iblSkyInfo.sampler = m_skyboxSampler;
+	iblSkyInfo.imageView = m_skyboxImage.imageView;
+	iblSkyInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	// BRDF LUT
+	VkDescriptorImageInfo iblBRDFInfo{};
+	iblBRDFInfo.sampler = m_sampler;
+	iblBRDFInfo.imageView = m_brdfImageView;
+	iblBRDFInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	std::array<VkWriteDescriptorSet, 2> iblWrites{};
+	iblWrites[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	iblWrites[0].dstSet = m_iblDescriptorSet;
+	iblWrites[0].dstBinding = 0;
+	iblWrites[0].descriptorCount = 1;
+	iblWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	iblWrites[0].pImageInfo = &iblSkyInfo;
+
+	iblWrites[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	iblWrites[1].dstSet = m_iblDescriptorSet;
+	iblWrites[1].dstBinding = 1;
+	iblWrites[1].descriptorCount = 1;
+	iblWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	iblWrites[1].pImageInfo = &iblBRDFInfo;
+
+	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(iblWrites.size()), iblWrites.data(), 0, nullptr);
 }
 
 void ErisEngine::initLumenLightingPipeline()
@@ -2562,7 +2684,7 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	VkRenderPassBeginInfo sceneRpInfo{};
 	sceneRpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	sceneRpInfo.pNext = nullptr;
-	sceneRpInfo.renderPass = m_viewportPass; // 使用单附件合成 Pass
+	sceneRpInfo.renderPass = m_viewportForwardPass; // 使用单附件合成 Pass
 	sceneRpInfo.framebuffer = m_viewportFramebuffer;
 	sceneRpInfo.renderArea.offset.x = 0;
 	sceneRpInfo.renderArea.offset.y = 0;
@@ -2575,6 +2697,9 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	vkCmdBeginRenderPass(cmd, &sceneRpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		// A. 画模型 (使用 Forward 专用管线)
+
+		// 绑定 IBL 描述符集 (Set 2)
+		
 		drawMainGeometry(cmd, m_pipeline, m_pipelineLayout);
 
 		// B. 画天空盒
@@ -3498,7 +3623,6 @@ void ErisEngine::drawMainGeometry(VkCommandBuffer cmd, VkPipeline pipeline, VkPi
 
 	FrameData& frame = getCurrentFrame();
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
 	// 绑定全局环境数据 (Set 0)
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 
@@ -3539,7 +3663,9 @@ void ErisEngine::drawMainGeometry(VkCommandBuffer cmd, VkPipeline pipeline, VkPi
 			VkDescriptorSet texSet = (mesh.material && mesh.material->textureSet != VK_NULL_HANDLE)
 				? mesh.material->textureSet : m_defaultTextureSet;
 			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &texSet, 0, nullptr);
-
+			if (m_activePath == RenderPath::Forward) {
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 2, 1, &m_iblDescriptorSet, 0, nullptr);
+			}
 			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer.buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);

@@ -27,6 +27,8 @@ layout(set = 0, binding = 0) uniform SceneData {
 
 layout(set = 0, binding = 1) uniform sampler2D shadowMap;
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
+layout(set = 2, binding = 0) uniform samplerCube skyboxMap;
+layout(set = 2, binding = 1) uniform sampler2D brdfLUT;
 
 layout(location = 0) out vec4 outFragColor;
 
@@ -158,7 +160,24 @@ void main() {
     }
 
     // --- 4. 环境光与自发光 ---
-    vec3 ambient = vec3(0.03) * albedo * scene.ambientColor.rgb * scene.ambientColor.a; // 极简环境光
+    // IBL diffuse
+    vec3 N_ibl = N;
+    vec3 V_ibl = V;
+    vec3 F0_ibl =mix(vec3(0.04), albedo, metallic);
+    vec3 F_ibl = fresnelSchlick(max(dot(N_ibl, V_ibl), 0.0), F0_ibl);
+    vec3 kD_ibl = (vec3(1.0) - F_ibl) * (1.0 - metallic);
+
+    vec3 irradiance = textureLod(skyboxMap, N_ibl, 8.0).rgb;
+    vec3 diffuseIBL = irradiance * albedo;
+    
+    // IBL specular
+    vec3 R_ibl = reflect(-V_ibl, N_ibl);
+    vec3 prefilteredColor = textureLod(skyboxMap, R_ibl, 0.0).rgb;
+    vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N_ibl, V_ibl), 0.0), roughness)).rg;
+    vec3 specularIBL = prefilteredColor * (F_ibl * envBRDF.x + envBRDF.y);
+
+    vec3 ambient = kD_ibl * diffuseIBL + specularIBL;
+    // vec3 ambient = vec3(0.03) * albedo * scene.ambientColor.rgb * scene.ambientColor.a;
     vec3 emissive = albedo * emission * 5.0; // 自发光
 
     vec3 color = ambient + Lo + emissive;

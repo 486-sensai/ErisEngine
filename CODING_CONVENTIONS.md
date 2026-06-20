@@ -9,12 +9,13 @@
 
 ### 1.1 文件命名
 
-| 类型 | 风格 | 示例 |
-|------|------|------|
-| C++ 头文件 (.h) | PascalCase | `ErisEngine.h`, `VulkanPipelineBuilder.h` |
-| C++ 源文件 (.cpp) | PascalCase | `ErisEngine.cpp`, `VulkanPipelineBuilder.cpp` |
-| GLSL 着色器 (.vert/.frag) | 全小写 + 点分隔 | `triangle.vert`, `grid.frag`, `skybox.frag` |
-| 编译后 SPIR-V (.spv) | snake_case | `sky_vert.spv`, `gbuffer_frag.spv` |
+
+| 类型                      | 风格            | 示例                                          |
+| ------------------------- | --------------- | --------------------------------------------- |
+| C++ 头文件 (.h)           | PascalCase      | `ErisEngine.h`, `VulkanPipelineBuilder.h`     |
+| C++ 源文件 (.cpp)         | PascalCase      | `ErisEngine.cpp`, `VulkanPipelineBuilder.cpp` |
+| GLSL 着色器 (.vert/.frag) | 全小写 + 点分隔 | `triangle.vert`, `grid.frag`, `skybox.frag`   |
+| 编译后 SPIR-V (.spv)      | snake_case      | `sky_vert.spv`, `gbuffer_frag.spv`            |
 
 ### 1.2 类型命名 (class / struct / enum)
 
@@ -31,23 +32,25 @@ enum class RenderPath { Forward, Lumen };
 
 项目内存在三种风格混用，**已有代码请保持原风格，新增代码优先使用 PascalCase**：
 
-| 风格 | 使用场景 | 示例 |
-|------|----------|------|
-| PascalCase | 引擎核心类方法 | `initVulkan()`, `createSwapchain()`, `drawFrame()` |
+
+| 风格       | 使用场景                | 示例                                                    |
+| ---------- | ----------------------- | ------------------------------------------------------- |
+| PascalCase | 引擎核心类方法          | `initVulkan()`, `createSwapchain()`, `drawFrame()`      |
 | snake_case | Editor 类方法、工具函数 | `render_editor()`, `push_function()`, `syncToPhysics()` |
-| camelCase | 少量转换辅助函数 | `aiMatrix4x4ToGlm()`, `getOrLoadModel()` |
+| camelCase  | 少量转换辅助函数        | `aiMatrix4x4ToGlm()`, `getOrLoadModel()`                |
 
 着色器入口固定为 `void main()`。
 
 ### 1.4 变量命名
 
-| 作用域 | 风格 | 示例 |
-|--------|------|------|
-| 成员变量 | `m_` 前缀 + PascalCase | `m_isInitialized`, `m_frameNumber`, `m_selectedObject` |
-| 局部变量 | camelCase（主要） | `surfaceFormat`, `createInfo`, `imageCount` |
-| 局部变量 | snake_case（少数 Vulkan 教程遗留） | `vStagingInfo`, `vertexStaging` |
-| 函数参数 | camelCase | `device`, `filePath`, `deltaTime` |
-| 全局常量 (文件域) | PascalCase | `MAX_FRAMES_IN_FLIGHT` |
+
+| 作用域            | 风格                               | 示例                                                   |
+| ----------------- | ---------------------------------- | ------------------------------------------------------ |
+| 成员变量          | `m_` 前缀 + PascalCase             | `m_isInitialized`, `m_frameNumber`, `m_selectedObject` |
+| 局部变量          | camelCase（主要）                  | `surfaceFormat`, `createInfo`, `imageCount`            |
+| 局部变量          | snake_case（少数 Vulkan 教程遗留） | `vStagingInfo`, `vertexStaging`                        |
+| 函数参数          | camelCase                          | `device`, `filePath`, `deltaTime`                      |
+| 全局常量 (文件域) | PascalCase                         | `MAX_FRAMES_IN_FLIGHT`                                 |
 
 ### 1.5 命名空间
 
@@ -80,13 +83,14 @@ namespace fs = std::filesystem;
 
 > **注意：** 项目内存在不一致，修改文件时遵循该文件原有风格。
 
-| 文件 | 缩进方式 |
-|------|----------|
-| `ErisEngine.cpp` | **Tab** |
-| `main.cpp` | **Tab** |
-| `DeletionQueue.cpp` | **Tab** |
-| `VulkanPipelineBuilder.cpp` | **Tab** |
-| 其余 .cpp 和所有 .h | **4 空格** |
+
+| 文件                        | 缩进方式   |
+| --------------------------- | ---------- |
+| `ErisEngine.cpp`            | **Tab**    |
+| `main.cpp`                  | **Tab**    |
+| `DeletionQueue.cpp`         | **Tab**    |
+| `VulkanPipelineBuilder.cpp` | **Tab**    |
+| 其余 .cpp 和所有 .h         | **4 空格** |
 
 **新增文件统一使用 4 空格**。
 
@@ -137,11 +141,12 @@ bool isComplete() {
 
 ### 3.2 编码分布（已有文件）
 
-| 编码 | 适用场景 | 涉及文件 |
-|------|----------|----------|
-| **GBK** | 含中文注释/字符串的 C++ 文件、着色器 | `ErisEngine.h`, `ErisEngine.cpp`, `Camera.h`, `ErisEditor.h`, `ErisPhysics.h/cpp`, `ErisWorld.h/cpp`, `LayoutTransition.h`, `RenderObject.h/cpp`, `VulkanPipelineBuilder.cpp`, `VulkanType.h/cpp`, `triangle.vert/frag`, `grid.vert/frag`, `shadow.vert`, `skybox.vert`, `Lumen/gbuffer.vert/frag`, `Lumen/main.frag` |
-| **UTF-8 (无 BOM)** | 纯 ASCII 文件（无中文） | `DeletionQueue.h/cpp`, `Mesh.h`, `VulkanInitializers.h/cpp`, `VulkanPipelineBuilder.h`, `StbImageImplementation.cpp`, `VmaUsage.cpp`, `main.cpp`, `compile.bat`, `Lumen/main.vert`, `skybox.frag`, `README.md` |
-| **UTF-8 with BOM** | 特例 | `ErisEditor.cpp`（不建议新增 UTF-8 BOM 文件） |
+
+| 编码               | 适用场景                             | 涉及文件                                                                                                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GBK**            | 含中文注释/字符串的 C++ 文件、着色器 | `ErisEngine.h`, `ErisEngine.cpp`, `Camera.h`, `ErisEditor.h`, `ErisPhysics.h/cpp`, `ErisWorld.h/cpp`, `LayoutTransition.h`, `RenderObject.h/cpp`, `VulkanPipelineBuilder.cpp`, `VulkanType.h/cpp`, `triangle.vert/frag`, `grid.vert/frag`, `shadow.vert`, `skybox.vert`, `Lumen/gbuffer.vert/frag`, `Lumen/main.frag` |
+| **UTF-8 (无 BOM)** | 纯 ASCII 文件（无中文）              | `DeletionQueue.h/cpp`, `Mesh.h`, `VulkanInitializers.h/cpp`, `VulkanPipelineBuilder.h`, `StbImageImplementation.cpp`, `VmaUsage.cpp`, `main.cpp`, `compile.bat`, `Lumen/main.vert`, `skybox.frag`, `README.md`                                                                                                        |
+| **UTF-8 with BOM** | 特例                                 | `ErisEditor.cpp`（不建议新增 UTF-8 BOM 文件）                                                                                                                                                                                                                                                                         |
 
 ### 3.3 判断方法与操作指引
 
@@ -270,29 +275,31 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 
 ### 6.4 构建系统与依赖版本
 
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| **Vulkan SDK** | **1.4.335.0** | SDK 版本。 |
-| **Vulkan API 版本** | `VK_API_VERSION_1_4` | 已升级。`appInfo.apiVersion` 和 `allocatorInfo.vulkanApiVersion`均使用 1.4。 |
-| **Vulkan 头文件** | `vulkan_core.h` 1.4.335 | `VK_HEADER_VERSION_COMPLETE = VK_MAKE_API_VERSION(0, 1, 4, 335)` |
-| **VMA (Vulkan Memory Allocator)** | 3.3.0 | 位于 SDK 内 `vma/vk_mem_alloc.h` |
-| **volk** | 最新 (zeux/volk) | Vulkan 动态加载，位于 `Volk/volk.h` |
-| **GLFW** | 3.4 | `glfw-3.4.bin.WIN64`，静态链接 `glfw3.lib` |
-| **GLM** | 1.0.2 | 随 Vulkan SDK 分发 |
-| **Jolt Physics** | 5.5.1 | 静态链接 `Jolt.lib` |
-| **ImGui** | 1.92.7 WIP | docking 分支 |
-| **ImGuizmo** | 最新 (master) | 集成于 ImGui 上层 |
-| **Assimp** | 3.0.0 | NuGet 包导入 (`Assimp.redist.3.0.0`) |
-| **stb_image** | 最新 (单文件) | 用于纹理加载 |
+
+| 依赖                              | 版本                    | 说明                                                                         |
+| --------------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| **Vulkan SDK**                    | **1.4.335.0**           | SDK 版本。                                                                   |
+| **Vulkan API 版本**               | `VK_API_VERSION_1_4`    | 已升级。`appInfo.apiVersion` 和 `allocatorInfo.vulkanApiVersion`均使用 1.4。 |
+| **Vulkan 头文件**                 | `vulkan_core.h` 1.4.335 | `VK_HEADER_VERSION_COMPLETE = VK_MAKE_API_VERSION(0, 1, 4, 335)`             |
+| **VMA (Vulkan Memory Allocator)** | 3.3.0                   | 位于 SDK 内`vma/vk_mem_alloc.h`                                              |
+| **volk**                          | 最新 (zeux/volk)        | Vulkan 动态加载，位于`Volk/volk.h`                                           |
+| **GLFW**                          | 3.4                     | `glfw-3.4.bin.WIN64`，静态链接 `glfw3.lib`                                   |
+| **GLM**                           | 1.0.2                   | 随 Vulkan SDK 分发                                                           |
+| **Jolt Physics**                  | 5.5.1                   | 静态链接`Jolt.lib`                                                           |
+| **ImGui**                         | 1.92.7 WIP              | docking 分支                                                                 |
+| **ImGuizmo**                      | 最新 (master)           | 集成于 ImGui 上层                                                            |
+| **Assimp**                        | 3.0.0                   | NuGet 包导入 (`Assimp.redist.3.0.0`)                                         |
+| **stb_image**                     | 最新 (单文件)           | 用于纹理加载                                                                 |
 
 **构建工具链**：
 
-| 工具 | 版本 |
-|------|------|
-| **Visual Studio** | 2022 (Platform Toolset v143) |
-| **Windows SDK** | 10.0 |
-| **C++ 标准** | C++17 (`stdcpp17`) |
-| **CMake** | ≥ 3.15（辅构建系统） |
+
+| 工具                 | 版本                                 |
+| -------------------- | ------------------------------------ |
+| **Visual Studio**    | 2022 (Platform Toolset v143)         |
+| **Windows SDK**      | 10.0                                 |
+| **C++ 标准**         | C++17 (`stdcpp17`)                   |
+| **CMake**            | ≥ 3.15（辅构建系统）                |
 | **glslangValidator** | 随 Vulkan SDK 分发（着色器离线编译） |
 
 **主构建文件**：`ErisEngine.vcxproj`（Visual Studio）
@@ -384,10 +391,11 @@ D:\Users\Alice486\source\repos\ErisEngine\
 > Step 3 中用户提出的技术 Q&A 也应一并记入日志。
 
 > **运行时错误处理**：编译/运行时报错时，AI 在 Tutorial 中当前 Step 末尾追加：
+>
 > 1. 完整报错信息
 > 2. 错误原因分析
 > 3. 修复步骤
-> 用户根据修复步骤改代码 → 重新 Step 4 审查 → Step 5 测试
+>    用户根据修复步骤改代码 → 重新 Step 4 审查 → Step 5 测试
 
 ```
 Step 1 ── 方案规划（AI 写，用户审）
@@ -422,3 +430,15 @@ Step 6 ── 提交 & 日志（用户发令，AI 执行）
 ```
 
 每个 Step 走完后，进入 Tutorial 中的下一个 Step，重复 Step 3-6。
+
+### 7.5 代码结构原则
+
+#### 单一职责
+
+- **每个函数做一件事**。不要往现有函数中硬塞长串代码，应新建独立函数。
+  - 例如：描述符写入应封装为 `updateXxxDescriptorSet()`，不要写在 `Eris_init()` 或 `drawFrame()` 中。
+- **不同功能板块应拆分到不同 .h/.cpp 文件**，而不是全部堆积在 `ErisEngine.cpp`。
+  - 渲染管线相关优先放入 `VulkanPipelineBuilder.h/cpp`
+  - 描述符管理使用独立函数或独立文件
+  - Vulkan 类型定义放入 `VulkanType.h`
+- 函数职责不清时，优先拆函数，而不是加注释解释"这个函数做了很多事"。
