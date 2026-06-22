@@ -1,5 +1,7 @@
 #version 450
 #extension GL_KHR_vulkan_glsl : enable
+#extension GL_GOOGLE_include_directive : enable
+#include "shadows/pcss.glsl"
 
 layout(location = 0) in vec3 nearPoint;
 layout(location = 1) in vec3 farPoint;
@@ -33,39 +35,6 @@ float computeDepth(vec3 worldPos) {
     return clamp(depth, 0.0, 0.999999);
 }
 
-// 带有 PCF 柔和边缘的阴影计算
-float calculateShadow(vec3 worldPos) {
-    vec4 shadowPos = scene.sunlightProj * vec4(worldPos, 1.0);
-    vec3 projCoords = shadowPos.xyz / shadowPos.w;
-    
-    // 转换到 UV 空间 [0, 1] (Vulkan Z本身就是 [0,1]，不需要 *0.5+0.5)
-    vec2 uv = projCoords.xy * 0.5 + 0.5;
-
-    // 超出光源照射范围的地方不产生阴影
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || projCoords.z > 1.0) {
-        return 0.0;
-    }
-
-    float currentDepth = projCoords.z;
-    
-    // 【核心修正】：Bias 必须非常小，适应 [0, 1] 的空间
-    // 因为你的正交矩阵远近裁面相差近 200，0.002 大约代表 0.4 个世界单位的容差
-    float bias = 0.002; 
-    
-    // PCF (百分比渐近滤波) - 采样周围 9 个像素求平均，产生软阴影
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(shadowMap, uv + vec2(x, y) * texelSize).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
-    }
-    shadow /= 9.0;
-    
-    return shadow;
-}
 
 void main() {
     float t = -nearPoint.y / (farPoint.y - nearPoint.y);
@@ -77,7 +46,8 @@ void main() {
     gl_FragDepth = computeDepth(fragPos3D);
 
     // 计算阴影 (返回值为 0.0 到 1.0，越大代表越处于阴影中)
-    float shadow = calculateShadow(fragPos3D);
+    vec4 shadowPos = scene.sunlightProj * vec4(fragPos3D, 1.0);
+    float shadow = calculatePCSS(shadowMap, shadowPos);
 
     vec2 coord = fragPos3D.xz;
     vec2 derivative = fwidth(coord);
