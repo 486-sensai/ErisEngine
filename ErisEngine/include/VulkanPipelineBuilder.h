@@ -20,11 +20,18 @@ public:
 	VkPipelineDepthStencilStateCreateInfo m_depthStencil;
 	VkPipelineLayout m_pipelineLayout;
 	
-
-
+	
 	VkPipeline buildPipeline(VkDevice device,VkRenderPass pass);
 
 private:
 
 
+};
+
+class ComputePipelineBuilder
+{
+public:
+	VkPipelineLayout m_pipelineLayout;
+	
+	VkPipeline buildComputePipeline(VkDevice device, VkShaderModule shaderModule);
 };

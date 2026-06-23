@@ -72,6 +72,7 @@ int ErisEngine::Eris_init()
 	initDescriptors();
 	initDescriptorPool();
 
+	initComputePipeline();
 	initForwardPipeline();
 	initLumenGbufferPipeline();
 	initLumenLightingPipeline();
@@ -117,6 +118,8 @@ int ErisEngine::Eris_init()
 	initDefaultResources();
 	// 初始化世界光
 	initSceneData();
+	
+	initAOResources();
 
 
 	Model* pSportCar = getOrLoadModel("assets/sportsCar/sportsCar.obj");
@@ -860,6 +863,49 @@ void ErisEngine::updateSkyboxDescriptor()
 	vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 }
 
+void ErisEngine::initAOResources()
+{
+	// 1. 创建 AO 存储图像
+	VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = VK_FORMAT_R8_UNORM;
+	imgInfo.extent = { m_swapchainExtent.width,m_swapchainExtent.height,1 };
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_aoImage.image, &m_aoImage.allocation, nullptr);
+	m_aoImage.imageView = createImageView(m_aoImage.image, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+
+
+	// 2. 写入 compute 描述符集
+	VkDescriptorSetAllocateInfo dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dsAlloc.descriptorPool = m_descriptorPool;
+	dsAlloc.descriptorSetCount = 1;
+	dsAlloc.pSetLayouts = &m_computeDescriptorSetLayout;
+	vkAllocateDescriptorSets(m_device, &dsAlloc, &m_computeDescriptorSet);
+
+	VkDescriptorImageInfo aoInfo{};
+	aoInfo.imageView = m_aoImage.imageView;
+	aoInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+	VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	write.dstSet = m_computeDescriptorSet;
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	write.pImageInfo = &aoInfo;
+	vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, m_aoImage.imageView, nullptr);
+		vmaDestroyImage(m_allocator, m_aoImage.image, m_aoImage.allocation);
+		});
+}
+
 void ErisEngine::initSkyboxMesh()
 {
 	std::vector<Vertex> skyboxVertices = {
@@ -1300,6 +1346,48 @@ void ErisEngine::initShadowPipeline()
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroyPipelineLayout(m_device, m_shadowPipelineLayout, nullptr);
 		vkDestroyPipeline(m_device, m_shadowPipeline, nullptr);
+		});
+}
+
+// Build compute pipeline
+void ErisEngine::initComputePipeline()
+{
+	// 1. 加载 compute shader
+	VkShaderModule compModule;
+	if (!loadShaderModule("shaders/hbao_clear.spv", &compModule)) {
+		throw std::runtime_error("failed to load compute shader!");
+	}
+
+
+	// 2. 描述符布局
+	std::array<VkDescriptorSetLayoutBinding, 1> binds{};
+	binds[0].binding = 0;
+	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	layoutInfo.bindingCount = static_cast<uint32_t>(binds.size());
+	layoutInfo.pBindings = binds.data();
+	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_computeDescriptorSetLayout);
+
+	// 3. pipeline layout
+	VkPipelineLayoutCreateInfo plInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plInfo.setLayoutCount = 1;
+	plInfo.pSetLayouts = &m_computeDescriptorSetLayout;
+	vkCreatePipelineLayout(m_device, &plInfo, nullptr, &m_computePipelineLayout);
+
+	// 4. compute pipeline
+	ComputePipelineBuilder builder;
+	builder.m_pipelineLayout = m_computePipelineLayout;
+	m_computePipeline = builder.buildComputePipeline(m_device, compModule);
+	vkDestroyShaderModule(m_device, compModule, nullptr);
+
+	// 5. 删除队列
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipeline(m_device, m_computePipeline, nullptr);
+		vkDestroyPipelineLayout(m_device, m_computePipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
 		});
 }
 
@@ -2348,8 +2436,9 @@ void ErisEngine::initDescriptors() {
 void ErisEngine::initDescriptorPool()
 {
 	std::vector<VkDescriptorPoolSize>sizes = {
-		{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,100},			// 支持 100 个全局数据块
-		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,500}		// 支持 500 张材质贴图
+		{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,100},				// 支持 100 个全局数据块
+		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,500},		// 支持 500 张材质贴图
+		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,10}
 	};
 
 	VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -2818,17 +2907,6 @@ void ErisEngine::initLumenGbufferPipeline()
 		});
 
 }
-void ErisEngine::drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex)
-{
-	// 1. 渲染阴影贴图 (复用 Lumen 路径的函数)
-	executeShadowPass(cmd);
-
-	// 2. 渲染主场景 (Forward 路径专用)
-	executeForwardPass(cmd);
-
-	// 3. 绘制编辑器 UI (复用 Lumen 路径的函数)
-	executeEditorUIPass(cmd, imageIndex);
-}
 void ErisEngine::executeShadowPass(VkCommandBuffer cmd) {
 	// --- 1. 显式配置 RenderPass 开始信息 ---
 	VkRenderPassBeginInfo shadowRpInfo{};
@@ -2913,6 +2991,46 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1,1,0);
 }
 
+void ErisEngine::executeComputePass(VkCommandBuffer cmd)
+{
+	// 1. 转 AO 图到 GENERAL（storage image 需要）
+	transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
+		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+
+	// 2. dispatch compute
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipeline);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+		m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, nullptr);
+	vkCmdDispatch(cmd, (m_swapchainExtent.width + 15) / 16, (m_swapchainExtent.height + 15) / 16, 1);
+
+	// 3. compute → graphics barrier
+	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+	// 4. 转回 SHADER_READ_ONLY 供 fragment shader 使用
+	transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+}
+
+
+void ErisEngine::drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex)
+{
+	// 1. 渲染阴影贴图 (复用 Lumen 路径的函数)
+	executeShadowPass(cmd);
+
+	// 2. 渲染主场景 (Forward 路径专用)
+	executeForwardPass(cmd);
+
+	// 3. compute shader 计算
+	executeComputePass(cmd);
+
+	// 4. 绘制编辑器 UI (复用 Lumen 路径的函数)
+	executeEditorUIPass(cmd, imageIndex);
+}
+
 void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t imageIndex)
 {
 	// ---------------------------------------------------------
@@ -2932,8 +3050,11 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 	// ---------------------------------------------------------
 	executeLumenCompositionPass(cmd);
 
+	// [PASS 3: Compute shader - 计算---
+	executeComputePass(cmd);
+
 	// ---------------------------------------------------------
-   // 【PASS 3: UI Pass - 叠加 ImGui 界面到最终交换链】
+   // 【PASS 4: UI Pass - 叠加 ImGui 界面到最终交换链】
    // ---------------------------------------------------------
 	executeEditorUIPass(cmd, imageIndex);
 	

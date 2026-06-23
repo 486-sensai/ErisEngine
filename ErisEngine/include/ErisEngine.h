@@ -208,6 +208,13 @@ private:
 	VkFramebuffer m_gbufferFramebuffer;
 	VkPipelineLayout m_lumenGbufferPipelineLayout;
 
+	// compute shader
+	VkPipelineLayout m_computePipelineLayout;
+	VkPipeline m_computePipeline;
+	VkDescriptorSetLayout m_computeDescriptorSetLayout;
+	VkDescriptorSet m_computeDescriptorSet;
+	AllocatedImage m_aoImage;
+
 public:
 
 	// ----------------------vulkan rendering functions-------------------
@@ -224,6 +231,7 @@ public:
 	void initSkyboxPipeline();
 	void initGridPipeline();
 	void initShadowPipeline();
+	void initComputePipeline();
 	void initDescriptors();
 	void initDescriptorPool();
 
@@ -268,6 +276,8 @@ public:
 	void createFramebuffers();
 	void createSceneBuffers();
 	void updateSkyboxDescriptor();
+
+	void initAOResources();
 
 
 	void initSkyboxMesh();
@@ -355,6 +365,7 @@ public:
 	void executeEditorUIPass(VkCommandBuffer cmd, uint32_t imageIndex);
 	void executeShadowPass(VkCommandBuffer cmd);
 	void executeForwardPass(VkCommandBuffer cmd);
+	void executeComputePass(VkCommandBuffer cmd);
 
 
 	RenderObject* pickObject(float mouseX, float mouseY);
