@@ -33,9 +33,9 @@ layout(set = 1, binding = 2) uniform sampler2D gAlbedo;
 // 新增：天空盒，用于 IBL
 layout(set = 1, binding = 3) uniform samplerCube skyboxMap; 
 layout(set = 1, binding = 4) uniform sampler2D brdfLUT;
-layout(set = 1, binding = 7) uniform sampler2D aoTexture;
 layout(set = 1, binding = 5) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 6) uniform samplerCube prefilteredMap;
+layout(set = 1, binding = 7) uniform sampler2D aoTexture;
 
 const float PI = 3.14159265359;
 
