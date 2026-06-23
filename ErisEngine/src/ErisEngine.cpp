@@ -3158,9 +3158,9 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 	executeGBufferPass(cmd);
 
 	// ---------------------------------------------------------
-	// [PASS 2: Compute shader - 计算---
-	// ---------------------------------------------------------
-	//executeGTAOPass(cmd);
+		// [PASS 2: Compute shader - GTAO
+		// ---------------------------------------------------------
+	executeGTAOPass(cmd);
 
 	// ---------------------------------------------------------
 	// 【PASS 3: Lighting Pass - 最终光照与 Lumen 计算】
