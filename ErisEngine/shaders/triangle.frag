@@ -1,5 +1,7 @@
 #version 450
 #extension GL_KHR_vulkan_glsl : enable
+#extension GL_GOOGLE_include_directive : enable
+#include "shadows/pcss.glsl"
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragUV;
@@ -75,27 +77,6 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// 柔和软阴影 (PCF)
-float calculateShadow(vec4 shadowPos, vec3 N, vec3 L) {
-    vec3 projCoords = shadowPos.xyz / shadowPos.w;
-    vec2 uv = projCoords.xy * 0.5 + 0.5;
-    if (projCoords.z > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
-    
-    float currentDepth = projCoords.z;
-    // 动态 Bias 消除网格纹
-    float bias = max(0.005 * (1.0 - dot(N, L)), 0.001);
-    
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    for(int x = -1; x <= 1; ++x) {
-        for(int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(shadowMap, uv + vec2(x, y) * texelSize).r; 
-            shadow += currentDepth - bias > pcfDepth ? 1.0 : 0.0;        
-        }    
-    }
-    return shadow / 9.0;
-}
-
 void main() {
     // 1. 基础属性准备
     vec4 texColor = texture(texSampler, fragUV);
@@ -113,7 +94,7 @@ void main() {
     F0 = mix(F0, albedo, metallic);
 
     vec3 Lo = vec3(0.0); // 出射光总能量
-    float shadow = calculateShadow(fragPosLightSpace, N, normalize(scene.sunlightDir.xyz));  
+    float shadow = calculatePCSS(shadowMap,fragPosLightSpace);
 
     // --- 2. 太阳光 PBR 计算 ---
     vec3 L_sun = normalize(scene.sunlightDir.xyz);

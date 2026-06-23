@@ -56,3 +56,24 @@ VkPipeline PipelineBuilder::buildPipeline(VkDevice device, VkRenderPass pass)
     }
     return newPipeline;
 }
+
+
+VkPipeline ComputePipelineBuilder::buildComputePipeline(VkDevice device, VkShaderModule shaderModule)
+{
+    VkPipelineShaderStageCreateInfo stage{};
+    stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = shaderModule;
+    stage.pName = "main";
+
+    VkComputePipelineCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    info.stage = stage;
+    info.layout = m_pipelineLayout;
+
+    VkPipeline pipeline;
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create compute pipeline!");
+    }
+    return pipeline;
+}

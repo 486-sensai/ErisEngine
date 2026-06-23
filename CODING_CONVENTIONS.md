@@ -132,12 +132,22 @@ bool isComplete() {
 
 ## 3. 文件编码
 
-### 3.1 核心原则
+### 3.1 核心原则 — 铁律
 
 **含中文注释或中文字符串的文件，一律使用 GBK 编码保存。**
 **纯 ASCII（无中文）的文件可以使用 UTF-8（无 BOM）。**
 
-> ⚠️ 这是**硬性规定**。任何时候修改代码，必须确保编辑器的"保存编码"设置为 GBK（或中文 Windows 的 ANSI），否则你的 AI 助手/编辑器可能以 UTF-8 写入文件，导致中文注释和字符串全部乱码。
+> ⚠️ 这是**铁律（IRON RULE）**。任何时候修改代码，必须确保编辑器的"保存编码"设置为 GBK（或中文 Windows 的 ANSI），否则你的 AI 助手/编辑器可能以 UTF-8 写入文件，导致中文注释和字符串全部乱码。
+
+**对本 AI 助手的硬性约束（历史教训）：**
+
+1. **不得使用 `Write` 工具写入含中文的 GBK 文件。** `Write` 工具输出 UTF-8，直接破坏 GBK 中文。
+2. **不得使用 `Edit` 工具修改含中文的 GBK 文件。** `Edit` 工具替换字符串时混合 UTF-8 字节到 GBK 流中，导致文件永久损坏且不可逆。
+3. **修改 GBK 文件的唯一安全方式：**
+   - 改纯英文/ASCII 内容 → 用 `sed -i`（字节级替换，不碰中文区域）
+   - 必须写含中文的文件 → 用 `python3` 以 `'wb'` 模式写入 `.encode('gbk')` 后的字节
+   - 必须重构整个文件 → 先从 git 恢复原版，再用 sed/python 做小改
+4. **如何判断文件编码：** 用 `file` 命令：`file xxx.cpp` → `ISO-8859 text` 就是 GBK（`file` 无法从单字节编码中区分 GBK）。
 
 ### 3.2 编码分布（已有文件）
 
@@ -219,7 +229,7 @@ ErisEngine/
 ### 5.4 智能指针
 
 - 所有权用 `std::unique_ptr`：`std::vector<std::unique_ptr<RenderObject>> m_objects`。
-- **禁止使用 `std::shared_ptr`**（项目目前不使用）。
+- **可以使用 `std::shared_ptr`**（项目目前不使用）。
 - 非拥有观察引用一律用原始指针。
 
 ### 5.5 RAII 模式
@@ -264,7 +274,7 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 
 ### 6.2 着色器约定
 
-- `#version 450` + `#extension GL_KHR_vulkan_glsl : enable`
+- `#version 450` + `#extension GL_KHR_vulkan_glsl : enable` 有需要会添加新的...
 - Push constants 统一命名：`layout(push_constant) uniform constants { ... } PushConstants;`
 - 使用 `glslangValidator.exe` 离线编译（通过 `compile.bat`）。
 
@@ -399,12 +409,12 @@ D:\Users\Alice486\source\repos\ErisEngine\
 > 4. 通俗易懂：假设读者了解基础概念但不知道本项目细节，用例子和类比说明复杂问题
 > 5. 面试友好：每个技术决策都要能解释得清楚——"为什么选 A 不选 B"的答案是面试高频题
 
-> **运行时错误处理**：编译/运行时报错时，AI 在 Tutorial 中当前 Step 末尾追加：
+> **运行时错误处理**：编译/运行时报错时，遵循以下流程：
 >
-> 1. 完整报错信息
-> 2. 错误原因分析
-> 3. 修复步骤
->    用户根据修复步骤改代码 → 重新 Step 4 审查 → Step 5 测试
+> 1. **控制台逐步调试**：AI 引导用户在控制台中一步步修改代码、重新编译运行，直到正确为止
+> 2. **更新 Tutorial**：将最终正确的代码更新到 Tutorial 中对应 Step（替换错误代码），保证教程始终可复现
+> 3. **记录 Worklog**：清楚描述报错信息、根因分析、修改方法、涉及的知识点（面试级标准）
+> 4. 确认无误后 → 进入下一步
 
 ```
 Step 1 ── 方案规划（AI 写，用户审）
