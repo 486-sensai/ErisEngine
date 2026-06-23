@@ -1,7 +1,5 @@
 #version 450
 #extension GL_KHR_vulkan_glsl : enable
-#extension GL_GOOGLE_include_directive : enable
-#include "../shadows/pcss.glsl"
 
 layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outFragColor;
@@ -147,6 +145,14 @@ vec2 EnvBRDFApprox(float roughness, float NoV) {
     return AB;
 }
 
+float getSunShadow(vec3 worldPos) {
+    vec4 shadowPos = scene.sunlightProj * vec4(worldPos, 1.0);
+    vec3 projCoords = shadowPos.xyz / shadowPos.w;
+    vec2 uv = projCoords.xy * 0.5 + 0.5;
+    if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return 0.0;
+    float closestDepth = texture(shadowMap, uv).r;
+    return (projCoords.z - 0.005 > closestDepth) ? 1.0 : 0.0;
+}
 
 void main() {
     vec4 posE = texture(gPos, inUV);
@@ -171,8 +177,7 @@ void main() {
     vec3 Lo = vec3(0.0);
 
     // --- 1. 直接光照 (太阳 + 点光源) ---
-    vec4 shadowPos = scene.sunlightProj * vec4(worldPos, 1.0);
-    float shadow = calculatePCSS(shadowMap, shadowPos);
+    float shadow = getSunShadow(worldPos);
     vec3 L_sun = normalize(scene.sunlightDir.xyz);
     vec3 H_sun = normalize(V + L_sun);
     float NDF_s = DistributionGGX(N, H_sun, roughness);

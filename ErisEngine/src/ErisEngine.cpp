@@ -58,6 +58,7 @@ int ErisEngine::Eris_init()
 	initVma();
 	initSwapchain();
 	createDepthBuffer();
+	initCommands();
 
 	initRenderPass();
 	initViewportPass();
@@ -65,14 +66,15 @@ int ErisEngine::Eris_init()
 	initUIRenderPass();
 	createFramebuffers();
 
-	initGbuffer();
 	initSyncStructures();
-	initCommands();
+	initGbuffer();
 
 	initDescriptors();
 	initDescriptorPool();
 
-	initComputePipeline();
+
+
+	initGTAOPipeline();
 	initForwardPipeline();
 	initLumenGbufferPipeline();
 	initLumenLightingPipeline();
@@ -105,9 +107,6 @@ int ErisEngine::Eris_init()
 
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
-	updateSkyboxDescriptor();
-	updateLumenDescriptorSet();
-	updateForwardIBLDescriptorSet();
 
 	
 
@@ -121,6 +120,9 @@ int ErisEngine::Eris_init()
 	
 	initAOResources();
 
+	updateSkyboxDescriptor();
+	updateLumenDescriptorSet();
+	updateForwardIBLDescriptorSet();
 
 	Model* pSportCar = getOrLoadModel("assets/sportsCar/sportsCar.obj");
 	Model* pGroundAsset = getOrLoadModel("assets/ground/churchfloor.obj");
@@ -147,7 +149,6 @@ int ErisEngine::Eris_init()
 
 	}
 	m_camera.m_position = glm::vec3(0.0f, 1.0f, 3.0f);
-
 
 
 	m_isInitialized = true;
@@ -750,8 +751,10 @@ void ErisEngine::recreateSwapchain()
 	initShadowResources();
 	createSceneBuffers();
 	initViewportResources();
+	initAOResources();
 	initGbuffer();
 	updateLumenDescriptorSet();
+	updateForwardIBLDescriptorSet();
 	ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(m_swapchainImages.size()));
 }
 
@@ -879,26 +882,64 @@ void ErisEngine::initAOResources()
 	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_aoImage.image, &m_aoImage.allocation, nullptr);
 	m_aoImage.imageView = createImageView(m_aoImage.image, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+	
+    // 2. 分配 GTAO 描述符集
+    VkDescriptorSetAllocateInfo dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    dsAlloc.descriptorPool = m_descriptorPool;
+    dsAlloc.descriptorSetCount = 1;
+    dsAlloc.pSetLayouts = &m_gtaoDescriptorSetLayout;
+    vkAllocateDescriptorSets(m_device, &dsAlloc, &m_gtaoDescriptorSet);
 
+	// Binding 0: G-buffer normal
+	VkDescriptorImageInfo normalInfo{};
+	normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	normalInfo.imageView = m_gbuffer.normal.imageView;
+	normalInfo.sampler = m_sampler;
 
-	// 2. 写入 compute 描述符集
-	VkDescriptorSetAllocateInfo dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	dsAlloc.descriptorPool = m_descriptorPool;
-	dsAlloc.descriptorSetCount = 1;
-	dsAlloc.pSetLayouts = &m_computeDescriptorSetLayout;
-	vkAllocateDescriptorSets(m_device, &dsAlloc, &m_computeDescriptorSet);
+	// Binding 1: Depth
+	VkDescriptorImageInfo depthInfo{};
+	depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+	depthInfo.imageView = m_depthImage.imageView;
+	depthInfo.sampler = m_sampler;
 
+	// Binding 2: AO output (storage image)
 	VkDescriptorImageInfo aoInfo{};
-	aoInfo.imageView = m_aoImage.imageView;
 	aoInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	aoInfo.imageView = m_aoImage.imageView;
 
-	VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-	write.dstSet = m_computeDescriptorSet;
-	write.dstBinding = 0;
-	write.descriptorCount = 1;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	write.pImageInfo = &aoInfo;
-	vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+	// 3. 写入三个描述符
+	std::array<VkWriteDescriptorSet, 3> writes{};
+
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].dstSet = m_gtaoDescriptorSet;
+	writes[0].dstBinding = 0;
+	writes[0].descriptorCount = 1;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[0].pImageInfo = &normalInfo;
+
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].dstSet = m_gtaoDescriptorSet;
+	writes[1].dstBinding = 1;
+	writes[1].descriptorCount = 1;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &depthInfo;
+
+
+	writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[2].dstSet = m_gtaoDescriptorSet;
+	writes[2].dstBinding = 2;
+	writes[2].descriptorCount = 1;
+	writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	writes[2].pImageInfo = &aoInfo;
+
+	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+	
+	//std::cout << m_depthImage.image << std::endl;
+
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+		});
 
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroyImageView(m_device, m_aoImage.imageView, nullptr);
@@ -1350,45 +1391,67 @@ void ErisEngine::initShadowPipeline()
 }
 
 // Build compute pipeline
-void ErisEngine::initComputePipeline()
+void ErisEngine::initGTAOPipeline()
 {
 	// 1. 加载 compute shader
 	VkShaderModule compModule;
-	if (!loadShaderModule("shaders/hbao_clear.spv", &compModule)) {
-		throw std::runtime_error("failed to load compute shader!");
+	if (!loadShaderModule("shaders/gtao.spv", &compModule)) {
+		throw std::runtime_error("failed to load gtao compute shader!");
 	}
 
 
-	// 2. 描述符布局
-	std::array<VkDescriptorSetLayoutBinding, 1> binds{};
+	// 2. GTAO 描述符集布局 (set=1): normal + depth + AO
+	std::array<VkDescriptorSetLayoutBinding, 3> binds{};
+
 	binds[0].binding = 0;
-	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	binds[0].descriptorCount = 1;
 	binds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	binds[1].binding = 1;
+	binds[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binds[1].descriptorCount = 1;
+	binds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	binds[2].binding = 2;
+	binds[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	binds[2].descriptorCount = 1;
+	binds[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	layoutInfo.bindingCount = static_cast<uint32_t>(binds.size());
 	layoutInfo.pBindings = binds.data();
-	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_computeDescriptorSetLayout);
+	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_gtaoDescriptorSetLayout);
+	std::cout << "gtaoDescLayout=" << m_gtaoDescriptorSetLayout << std::endl;
 
-	// 3. pipeline layout
-	VkPipelineLayoutCreateInfo plInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	plInfo.setLayoutCount = 1;
-	plInfo.pSetLayouts = &m_computeDescriptorSetLayout;
-	vkCreatePipelineLayout(m_device, &plInfo, nullptr, &m_computePipelineLayout);
+    // 3. Pipeline Layout: set=0 (场景 UBO) + set=1 (GTAO) + Push Constants
+    VkDescriptorSetLayout setLayouts[] = { m_globalSetLayout, m_gtaoDescriptorSetLayout };
 
-	// 4. compute pipeline
-	ComputePipelineBuilder builder;
-	builder.m_pipelineLayout = m_computePipelineLayout;
-	m_computePipeline = builder.buildComputePipeline(m_device, compModule);
-	vkDestroyShaderModule(m_device, compModule, nullptr);
+    VkPushConstantRange pcRange{};
+    pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pcRange.offset = 0;
+    pcRange.size = sizeof(glm::mat4) + sizeof(glm::vec4) + sizeof(glm::vec2);
+    // mat4 invProj (64) + vec4 params (16) + vec2 screenSize (8) = 88 bytes
 
-	// 5. 删除队列
-	m_mainDeletionQueue.push_function([=]() {
-		vkDestroyPipeline(m_device, m_computePipeline, nullptr);
-		vkDestroyPipelineLayout(m_device, m_computePipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
-		});
+    VkPipelineLayoutCreateInfo plInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    plInfo.setLayoutCount = 2;
+    plInfo.pSetLayouts = setLayouts;
+    plInfo.pushConstantRangeCount = 1;
+    plInfo.pPushConstantRanges = &pcRange;
+    vkCreatePipelineLayout(m_device, &plInfo, nullptr, &m_gtaoPipelineLayout);
+
+    // 4. Compute Pipeline
+    ComputePipelineBuilder builder;
+    builder.m_pipelineLayout = m_gtaoPipelineLayout;
+    m_gtaoPipeline = builder.buildComputePipeline(m_device, compModule);
+    vkDestroyShaderModule(m_device, compModule, nullptr);
+
+    // 5. 删除队列
+    m_mainDeletionQueue.push_function([=]() {
+        vkDestroyPipeline(m_device, m_gtaoPipeline, nullptr);
+        vkDestroyPipelineLayout(m_device, m_gtaoPipelineLayout, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, m_gtaoDescriptorSetLayout, nullptr);
+    });
 }
 
 FrameData& ErisEngine::getCurrentFrame()
@@ -2263,13 +2326,13 @@ void ErisEngine::initDescriptors() {
 	sceneBinds[0].binding = 0;
 	sceneBinds[0].descriptorCount = 1;
 	sceneBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	sceneBinds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	sceneBinds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 	// Binding 1: 阴影深度贴图 (Sampler)
 	sceneBinds[1].binding = 1;
 	sceneBinds[1].descriptorCount = 1;
 	sceneBinds[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sceneBinds[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	sceneBinds[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 	sceneBinds[1].pImmutableSamplers = nullptr;
 
 	VkDescriptorSetLayoutCreateInfo globalLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -2349,6 +2412,7 @@ void ErisEngine::initDescriptors() {
 	fPreBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	iblBinds.push_back(fPreBind);
 
+
 	VkDescriptorSetLayoutCreateInfo iblLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	iblLayoutInfo.bindingCount = static_cast<uint32_t>(iblBinds.size());
 	iblLayoutInfo.pBindings = iblBinds.data();
@@ -2414,6 +2478,13 @@ void ErisEngine::initDescriptors() {
 	preBind.descriptorCount = 1;
 	preBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	lumenBinds.push_back(preBind);
+
+	VkDescriptorSetLayoutBinding aoLumenBind{};
+	aoLumenBind.binding = 7;
+	aoLumenBind.descriptorType= VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	aoLumenBind.descriptorCount = 1;
+	aoLumenBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	lumenBinds.push_back(aoLumenBind);
 
 	VkDescriptorSetLayoutCreateInfo lumenLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	lumenLayoutInfo.bindingCount = static_cast<uint32_t>(lumenBinds.size());
@@ -2549,6 +2620,14 @@ void ErisEngine::initGbuffer()
 		throw std::runtime_error("failed to create GBuffer framebuffer!");
 	}
 
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		transitionImageLayout(cmd, m_gbuffer.position.image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+		transitionImageLayout(cmd, m_gbuffer.normal.image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+		transitionImageLayout(cmd, m_gbuffer.albedo.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+		});
 	// 注册销毁
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroyFramebuffer(m_device, m_gbufferFramebuffer, nullptr);
@@ -2607,7 +2686,12 @@ void ErisEngine::updateLumenDescriptorSet()
 	preInfo.imageView = m_prefilteredMap.imageView;
 	preInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-	std::array<VkWriteDescriptorSet, 7> writes{};
+	VkDescriptorImageInfo aoLumenInfo{};
+	aoLumenInfo.sampler = m_sampler;
+	aoLumenInfo.imageView = m_aoImage.imageView;
+	aoLumenInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	std::array<VkWriteDescriptorSet, 8> writes{};
 
 	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	writes[0].dstSet = m_lumenDescriptorSet;
@@ -2658,6 +2742,13 @@ void ErisEngine::updateLumenDescriptorSet()
 	writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	writes[6].pImageInfo = &preInfo;
 
+	writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[7].dstSet = m_lumenDescriptorSet;
+	writes[7].dstBinding = 7;
+	writes[7].descriptorCount = 1;
+	writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[7].pImageInfo = &aoLumenInfo;
+
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
@@ -2691,6 +2782,7 @@ void ErisEngine::updateForwardIBLDescriptorSet()
 	preInfo.sampler = m_skyboxSampler;
 	preInfo.imageView = m_prefilteredMap.imageView;
 	preInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
 
 	std::array<VkWriteDescriptorSet, 4> iblWrites{};
 	iblWrites[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -2991,43 +3083,65 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1,1,0);
 }
 
-void ErisEngine::executeComputePass(VkCommandBuffer cmd)
+void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
 {
-	// 1. 转 AO 图到 GENERAL（storage image 需要）
+	// 1. 过渡 depth → DEPTH_STENCIL_READ_ONLY（G-buffer pass 后 depth 处于 ATTACHMENT_OPTIMAL）
+	transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1, 1, 0);
+
+	// 2. 过渡 AO 图 → GENERAL（storage image 需要）
 	transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
 		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
 
-	// 2. dispatch compute
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipeline);
+	// 3. 准备 push constants
+	glm::mat4 invProj = glm::inverse(m_sceneData.proj);
+
+	struct GTAOPushConstants {
+		glm::mat4 invProj;
+		glm::vec4 params;   // x: stepRadius, y: contrast, z: bias, w: pad
+		glm::vec2 screenSize;
+	} pc;
+	pc.invProj = invProj;
+	pc.params = glm::vec4(1.5f, 1.5f, 0.001f, 0.0f);
+	pc.screenSize = glm::vec2(m_swapchainExtent.width, m_swapchainExtent.height);
+
+	// 4. Dispatch GTAO compute
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_gtaoPipeline);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-		m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, nullptr);
+		m_gtaoPipelineLayout, 0, 1, &getCurrentFrame().sceneDescriptorSet, 0, nullptr);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+		m_gtaoPipelineLayout, 1, 1, &m_gtaoDescriptorSet, 0, nullptr);
+	vkCmdPushConstants(cmd, m_gtaoPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+		0, sizeof(pc), &pc);
 	vkCmdDispatch(cmd, (m_swapchainExtent.width + 15) / 16, (m_swapchainExtent.height + 15) / 16, 1);
 
-	// 3. compute → graphics barrier
+	// 5. compute → graphics barrier
 	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-	// 4. 转回 SHADER_READ_ONLY 供 fragment shader 使用
+	// 6. AO 图 → SHADER_READ_ONLY 供 fragment shader 采样
 	transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
 		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+	
+	transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1, 1, 0);
 }
 
 
 void ErisEngine::drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex)
 {
-	// 1. 渲染阴影贴图 (复用 Lumen 路径的函数)
+	// 1. 阴影 pass
 	executeShadowPass(cmd);
 
-	// 2. 渲染主场景 (Forward 路径专用)
+	// 2. 前向渲染世界
 	executeForwardPass(cmd);
 
-	// 3. compute shader 计算
-	executeComputePass(cmd);
-
-	// 4. 绘制编辑器 UI (复用 Lumen 路径的函数)
+	// 3. Editor UI
 	executeEditorUIPass(cmd, imageIndex);
 }
 
@@ -3042,16 +3156,16 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 	// 【PASS 1: Geometry Pass - 填充 GBuffer】
 	// ---------------------------------------------------------
 	executeGBufferPass(cmd);
-	transitionImageLayout(cmd, m_gbuffer.position.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
-	transitionImageLayout(cmd, m_gbuffer.normal.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
-	transitionImageLayout(cmd, m_gbuffer.albedo.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1,1,0);
+
 	// ---------------------------------------------------------
-	// 【PASS 2: Lighting Pass - 最终光照与 Lumen 计算】
+	// [PASS 2: Compute shader - 计算---
+	// ---------------------------------------------------------
+	//executeGTAOPass(cmd);
+
+	// ---------------------------------------------------------
+	// 【PASS 3: Lighting Pass - 最终光照与 Lumen 计算】
 	// ---------------------------------------------------------
 	executeLumenCompositionPass(cmd);
-
-	// [PASS 3: Compute shader - 计算---
-	executeComputePass(cmd);
 
 	// ---------------------------------------------------------
    // 【PASS 4: UI Pass - 叠加 ImGui 界面到最终交换链】
@@ -3299,11 +3413,11 @@ void ErisEngine::initViewportResources()
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
 			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
-			transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
-				VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,1);
-		}); 
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
+		transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
+			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+		});
 
 	if (m_viewportTextureSet != VK_NULL_HANDLE) {
 		ImGui_ImplVulkan_RemoveTexture(m_viewportTextureSet);

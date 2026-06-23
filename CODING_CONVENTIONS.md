@@ -219,7 +219,7 @@ ErisEngine/
 ### 5.4 智能指针
 
 - 所有权用 `std::unique_ptr`：`std::vector<std::unique_ptr<RenderObject>> m_objects`。
-- **禁止使用 `std::shared_ptr`**（项目目前不使用）。
+- **可以使用 `std::shared_ptr`**（项目目前不使用）。
 - 非拥有观察引用一律用原始指针。
 
 ### 5.5 RAII 模式
@@ -264,7 +264,7 @@ VkPipeline pipeline = builder.buildPipeline(device, pass);
 
 ### 6.2 着色器约定
 
-- `#version 450` + `#extension GL_KHR_vulkan_glsl : enable`
+- `#version 450` + `#extension GL_KHR_vulkan_glsl : enable` 有需要会添加新的...
 - Push constants 统一命名：`layout(push_constant) uniform constants { ... } PushConstants;`
 - 使用 `glslangValidator.exe` 离线编译（通过 `compile.bat`）。
 
@@ -399,12 +399,12 @@ D:\Users\Alice486\source\repos\ErisEngine\
 > 4. 通俗易懂：假设读者了解基础概念但不知道本项目细节，用例子和类比说明复杂问题
 > 5. 面试友好：每个技术决策都要能解释得清楚——"为什么选 A 不选 B"的答案是面试高频题
 
-> **运行时错误处理**：编译/运行时报错时，AI 在 Tutorial 中当前 Step 末尾追加：
+> **运行时错误处理**：编译/运行时报错时，遵循以下流程：
 >
-> 1. 完整报错信息
-> 2. 错误原因分析
-> 3. 修复步骤
->    用户根据修复步骤改代码 → 重新 Step 4 审查 → Step 5 测试
+> 1. **控制台逐步调试**：AI 引导用户在控制台中一步步修改代码、重新编译运行，直到正确为止
+> 2. **更新 Tutorial**：将最终正确的代码更新到 Tutorial 中对应 Step（替换错误代码），保证教程始终可复现
+> 3. **记录 Worklog**：清楚描述报错信息、根因分析、修改方法、涉及的知识点（面试级标准）
+> 4. 确认无误后 → 进入下一步
 
 ```
 Step 1 ── 方案规划（AI 写，用户审）

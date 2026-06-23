@@ -104,7 +104,7 @@ private:
 	VkRect2D m_scissor;
 	double m_lastX, m_lastY;
 
-	RenderPath m_activePath = RenderPath::Forward;
+	RenderPath m_activePath = RenderPath::Lumen;
 
 	// vulkan core
 	VkInstance m_instance;
@@ -209,10 +209,10 @@ private:
 	VkPipelineLayout m_lumenGbufferPipelineLayout;
 
 	// compute shader
-	VkPipelineLayout m_computePipelineLayout;
-	VkPipeline m_computePipeline;
-	VkDescriptorSetLayout m_computeDescriptorSetLayout;
-	VkDescriptorSet m_computeDescriptorSet;
+	VkPipelineLayout m_gtaoPipelineLayout;
+	VkPipeline m_gtaoPipeline;
+	VkDescriptorSetLayout m_gtaoDescriptorSetLayout;
+	VkDescriptorSet m_gtaoDescriptorSet;
 	AllocatedImage m_aoImage;
 
 public:
@@ -231,7 +231,7 @@ public:
 	void initSkyboxPipeline();
 	void initGridPipeline();
 	void initShadowPipeline();
-	void initComputePipeline();
+	void initGTAOPipeline();
 	void initDescriptors();
 	void initDescriptorPool();
 
@@ -365,7 +365,7 @@ public:
 	void executeEditorUIPass(VkCommandBuffer cmd, uint32_t imageIndex);
 	void executeShadowPass(VkCommandBuffer cmd);
 	void executeForwardPass(VkCommandBuffer cmd);
-	void executeComputePass(VkCommandBuffer cmd);
+	void executeGTAOPass(VkCommandBuffer cmd);
 
 
 	RenderObject* pickObject(float mouseX, float mouseY);
