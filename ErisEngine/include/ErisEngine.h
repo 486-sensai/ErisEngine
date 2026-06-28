@@ -216,21 +216,19 @@ private:
 	AllocatedImage m_aoImage;
 
 	// bloom
-	// HDR scene image (exported by main.frag before tone mapping)
-	AllocatedImage m_bloomHdrImage;
-	VkDescriptorSetLayout m_hdrDescriptorSetLayout;
-	VkDescriptorSet m_bloomHdrSet;
-
-	// Bloom pipeline
 	VkPipelineLayout m_bloomPipelineLayout;
 	VkPipelineLayout m_bloomCompPipelineLayout;
+	VkDescriptorSetLayout m_bloomCompSetLayout;
+	VkDescriptorSetLayout m_bloomDescriptorSetLayout;
 	VkPipeline m_bloomExtractPipeline;
 	VkPipeline m_bloomDownsamplePipeline;
 	VkPipeline m_bloomUpsamplePipeline;
 	VkPipeline m_bloomCompositePipeline;
-	VkDescriptorSetLayout m_bloomDescriptorSetLayout;
-	VkDescriptorSetLayout m_bloomCompDescriptorSetLayout;
 	AllocatedImage m_bloomMipChain[4]; // full, 1/2, 1/4, 1/8
+	VkDescriptorSet m_bloomDownsampleSets[3];
+	VkDescriptorSet m_bloomUpsampleSets[3];
+	VkDescriptorSet m_bloomExtractSet;
+	VkDescriptorSet m_bloomCompositeSet;
 
 public:
 

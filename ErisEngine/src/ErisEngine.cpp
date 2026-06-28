@@ -11,7 +11,7 @@ glm::mat4 aiMatrix4x4ToGlm(const aiMatrix4x4& from) {
 }
 
 static PFN_vkVoidFunction Eris_ImGui_Loader(const char* function_name, void* user_data) {
-    return vkGetInstanceProcAddr(*(VkInstance*)user_data, function_name);
+	return vkGetInstanceProcAddr(*(VkInstance*)user_data, function_name);
 }
 
 
@@ -33,7 +33,7 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 }
 
 
-int ErisEngine::Eris_init() 
+int ErisEngine::Eris_init()
 {
 	if (!glfwInit()) {
 		std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -109,7 +109,7 @@ int ErisEngine::Eris_init()
 	m_activeWorld->createDefaultSkybox();
 	m_skyboxImage = loadCubemap(m_activeWorld->skyboxFaces);
 
-	
+
 
 	m_editor = new ErisEditor();
 	m_editor->init(this);
@@ -118,7 +118,7 @@ int ErisEngine::Eris_init()
 	initDefaultResources();
 	// 初始化世界光
 	initSceneData();
-	
+
 	initAOResources();
 
 	updateSkyboxDescriptor();
@@ -159,7 +159,7 @@ int ErisEngine::Eris_init()
 }
 
 // 检查扩展是否支持交换链
-bool ErisEngine:: checkDeviceExtensionSupport(VkPhysicalDevice device) {
+bool ErisEngine::checkDeviceExtensionSupport(VkPhysicalDevice device) {
 	uint32_t extensionCount;
 	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
@@ -249,7 +249,7 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 
 	int width, height, channels;
 	std::vector<stbi_uc*> pixels(6);
-	
+
 	// 1. 加载 6 张图
 	for (int i = 0; i < 6; i++) {
 		pixels[i] = stbi_load(faces[i].c_str(), &width, &height, &channels, STBI_rgb_alpha);
@@ -261,7 +261,7 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 
 	uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 
-	VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB; 
+	VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 	VkExtent3D imageExtent;
 	imageExtent.width = static_cast<uint32_t>(width);
 	imageExtent.height = static_cast<uint32_t>(height);
@@ -271,10 +271,10 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	AllocatedBuffer stagingbuffer = createBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 	void* data;
 	vmaMapMemory(m_allocator, stagingbuffer.allocation, &data);
-		for (int i = 0; i < 6; i++) {
-			memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
-			stbi_image_free(pixels[i]);
-		}
+	for (int i = 0; i < 6; i++) {
+		memcpy(static_cast<char*>(data) + (layerSize * i), pixels[i], layerSize);
+		stbi_image_free(pixels[i]);
+	}
 	vmaUnmapMemory(m_allocator, stagingbuffer.allocation);
 
 	// 3. 创建 GPU Image (关键：arrayLayers = 6, flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
@@ -294,7 +294,7 @@ AllocatedImage ErisEngine::loadCubemap(const std::vector<std::string>& faces)
 	VmaAllocationCreateInfo vmaAllocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 	vmaCreateImage(m_allocator, &imgInfo, &vmaAllocInfo, &newImage.image, &newImage.allocation, nullptr);
 
-	
+
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		transitionImageLayout(cmd, newImage.image, imageFormat,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -401,7 +401,7 @@ AllocatedImage ErisEngine::loadHDRCubemap(const std::vector<std::string>& faces)
 
 	// 创建 Staging Buffer
 	AllocatedBuffer stagingbuffer = createBuffer(totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	
+
 	void* data;
 	vmaMapMemory(m_allocator, stagingbuffer.allocation, &data);
 	for (int i = 0; i < 6; i++) {
@@ -887,13 +887,13 @@ void ErisEngine::initAOResources()
 	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_aoImage.image, &m_aoImage.allocation, nullptr);
 	m_aoImage.imageView = createImageView(m_aoImage.image, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-	
-    // 2. 分配 GTAO 描述符集
-    VkDescriptorSetAllocateInfo dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    dsAlloc.descriptorPool = m_descriptorPool;
-    dsAlloc.descriptorSetCount = 1;
-    dsAlloc.pSetLayouts = &m_gtaoDescriptorSetLayout;
-    vkAllocateDescriptorSets(m_device, &dsAlloc, &m_gtaoDescriptorSet);
+
+	// 2. 分配 GTAO 描述符集
+	VkDescriptorSetAllocateInfo dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dsAlloc.descriptorPool = m_descriptorPool;
+	dsAlloc.descriptorSetCount = 1;
+	dsAlloc.pSetLayouts = &m_gtaoDescriptorSetLayout;
+	vkAllocateDescriptorSets(m_device, &dsAlloc, &m_gtaoDescriptorSet);
 
 	// Binding 0: G-buffer normal
 	VkDescriptorImageInfo normalInfo{};
@@ -938,7 +938,7 @@ void ErisEngine::initAOResources()
 	writes[2].pImageInfo = &aoInfo;
 
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-	
+
 	//std::cout << m_depthImage.image << std::endl;
 
 	immediateSubmit([&](VkCommandBuffer cmd) {
@@ -954,38 +954,34 @@ void ErisEngine::initAOResources()
 
 void ErisEngine::initBloomResources()
 {
-	VkExtent3D extent = { m_swapchainExtent.width,m_swapchainExtent.height,1 };
-
-	// HDR scene image
-	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-	imgInfo.imageType = VK_IMAGE_TYPE_2D;
-	imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-	imgInfo.extent = extent;
-	imgInfo.mipLevels = 1;
-	imgInfo.arrayLayers = 1;
-	imgInfo.samples = msaaSamples;
-	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-	imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-
 	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
-	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_bloomHdrImage.image, &m_bloomHdrImage.allocation, nullptr);
-	m_bloomHdrImage.imageView = createImageView(m_bloomHdrImage.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-
 
 	for (int i = 0; i < 4; i++) {
 		int d = 1 << i;
-		VkExtent3D mipExt{ std::max(1u, extent.width / d), std::max(1u, extent.height / d), 1 };
-		VkImageCreateInfo mipInfo = imgInfo;
+		VkExtent3D mipExt{ std::max(1u, m_swapchainExtent.width / d), std::max(1u, m_swapchainExtent.height / d), 1 };
+		VkImageCreateInfo mipInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+		mipInfo.imageType = VK_IMAGE_TYPE_2D;
+		mipInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
 		mipInfo.extent = mipExt;
+		mipInfo.mipLevels = 1;
+		mipInfo.arrayLayers = 1;
+		mipInfo.samples = msaaSamples;
+		mipInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+		mipInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		vmaCreateImage(m_allocator, &mipInfo, &allocInfo,
 			&m_bloomMipChain[i].image, &m_bloomMipChain[i].allocation, nullptr);
 		m_bloomMipChain[i].imageView = createImageView(
 			m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 	}
+	// 初始过渡：HDR 用 GENERAL（storage 读写，不转回 SHADER_READ_ONLY），mip 用 SHADER_READ_ONLY
+	immediateSubmit([&](VkCommandBuffer cmd) {
+		for (int i = 0; i < 4; i++) {
+			transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+		}
+	});
 
 	m_mainDeletionQueue.push_function([=]() {
-		vkDestroyImageView(m_device, m_bloomHdrImage.imageView, nullptr);
-		vmaDestroyImage(m_allocator, m_bloomHdrImage.image, m_bloomHdrImage.allocation);
 		for (int i = 0; i < 4; i++) {
 			vkDestroyImageView(m_device, m_bloomMipChain[i].imageView, nullptr);
 			vmaDestroyImage(m_allocator, m_bloomMipChain[i].image, m_bloomMipChain[i].allocation);
@@ -1004,7 +1000,7 @@ void ErisEngine::initSkyboxMesh()
 		{{-1.0f,  1.0f,  1.0f}, {}, {}, {}},
 		{{ 1.0f,  1.0f,  1.0f}, {}, {}, {}},
 		{{ 1.0f, -1.0f,  1.0f}, {}, {}, {}},
-		{{-1.0f, -1.0f,  1.0f}, {}, {}, {}} 
+		{{-1.0f, -1.0f,  1.0f}, {}, {}, {}}
 	};
 
 	std::vector<uint32_t> skyboxIndices = {
@@ -1148,7 +1144,7 @@ void ErisEngine::initForwardPipeline()
 	builder.m_pipelineLayout = m_pipelineLayout;
 	m_pipeline = builder.buildPipeline(m_device, m_viewportPass);
 
-	
+
 	vkDestroyShaderModule(m_device, vertModule, nullptr);
 	vkDestroyShaderModule(m_device, fragModule, nullptr);
 
@@ -1267,7 +1263,7 @@ void ErisEngine::initGridPipeline()
 	blendAttachment.blendEnable = VK_TRUE;
 	blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-	VkPipelineColorBlendAttachmentState gridBlend{}; 
+	VkPipelineColorBlendAttachmentState gridBlend{};
 	gridBlend.blendEnable = VK_TRUE;
 	gridBlend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
 	gridBlend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -1414,7 +1410,7 @@ void ErisEngine::initShadowPipeline()
 	builder.m_rasterizer.depthClampEnable = VK_FALSE;
 	builder.m_rasterizer.rasterizerDiscardEnable = VK_FALSE;
 	builder.m_rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-	builder.m_rasterizer.cullMode = VK_CULL_MODE_NONE; 
+	builder.m_rasterizer.cullMode = VK_CULL_MODE_NONE;
 	builder.m_rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 	builder.m_rasterizer.lineWidth = 1.0f;
 	builder.m_rasterizer.depthBiasEnable = VK_TRUE;
@@ -1471,80 +1467,107 @@ void ErisEngine::initGTAOPipeline()
 	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_gtaoDescriptorSetLayout);
 	std::cout << "gtaoDescLayout=" << m_gtaoDescriptorSetLayout << std::endl;
 
-    // 3. Pipeline Layout: set=0 (场景 UBO) + set=1 (GTAO) + Push Constants
-    VkDescriptorSetLayout setLayouts[] = { m_globalSetLayout, m_gtaoDescriptorSetLayout };
+	// 3. Pipeline Layout: set=0 (场景 UBO) + set=1 (GTAO) + Push Constants
+	VkDescriptorSetLayout setLayouts[] = { m_globalSetLayout, m_gtaoDescriptorSetLayout };
 
-    VkPushConstantRange pcRange{};
-    pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pcRange.offset = 0;
-    pcRange.size = sizeof(glm::mat4) + sizeof(glm::vec4) + sizeof(glm::vec2);
-    // mat4 invProj (64) + vec4 params (16) + vec2 screenSize (8) = 88 bytes
+	VkPushConstantRange pcRange{};
+	pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	pcRange.offset = 0;
+	pcRange.size = sizeof(glm::mat4) + sizeof(glm::vec4) + sizeof(glm::vec2);
+	// mat4 invProj (64) + vec4 params (16) + vec2 screenSize (8) = 88 bytes
 
-    VkPipelineLayoutCreateInfo plInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    plInfo.setLayoutCount = 2;
-    plInfo.pSetLayouts = setLayouts;
-    plInfo.pushConstantRangeCount = 1;
-    plInfo.pPushConstantRanges = &pcRange;
-    vkCreatePipelineLayout(m_device, &plInfo, nullptr, &m_gtaoPipelineLayout);
+	VkPipelineLayoutCreateInfo plInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plInfo.setLayoutCount = 2;
+	plInfo.pSetLayouts = setLayouts;
+	plInfo.pushConstantRangeCount = 1;
+	plInfo.pPushConstantRanges = &pcRange;
+	vkCreatePipelineLayout(m_device, &plInfo, nullptr, &m_gtaoPipelineLayout);
 
-    // 4. Compute Pipeline
-    ComputePipelineBuilder builder;
-    builder.m_pipelineLayout = m_gtaoPipelineLayout;
-    m_gtaoPipeline = builder.buildComputePipeline(m_device, compModule);
-    vkDestroyShaderModule(m_device, compModule, nullptr);
+	// 4. Compute Pipeline
+	ComputePipelineBuilder builder;
+	builder.m_pipelineLayout = m_gtaoPipelineLayout;
+	m_gtaoPipeline = builder.buildComputePipeline(m_device, compModule);
+	vkDestroyShaderModule(m_device, compModule, nullptr);
 
-    // 5. 删除队列
-    m_mainDeletionQueue.push_function([=]() {
-        vkDestroyPipeline(m_device, m_gtaoPipeline, nullptr);
-        vkDestroyPipelineLayout(m_device, m_gtaoPipelineLayout, nullptr);
-        vkDestroyDescriptorSetLayout(m_device, m_gtaoDescriptorSetLayout, nullptr);
-    });
+	// 5. 删除队列
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipeline(m_device, m_gtaoPipeline, nullptr);
+		vkDestroyPipelineLayout(m_device, m_gtaoPipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_gtaoDescriptorSetLayout, nullptr);
+		});
 }
 
 void ErisEngine::initBloomPipeline()
 {
-	// 通用 pipeline layout: set=0, binding=0 (input storage/sampler), binding=1 (output storage)
-	// extract/composite/upsample/downsample 都用不同的 pipeline 但 layout 可以统一
-	std::array<VkDescriptorSetLayoutBinding, 2>binds{};
-	binds[0].binding = 0;
-	binds[0].descriptorCount = 1;
-	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	VkPushConstantRange pcRange{};
+	pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	pcRange.offset = 0;
+	pcRange.size = 16; // vec4
 
-	binds[1].binding = 1;
-	binds[1].descriptorCount = 1;
-	binds[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	binds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	// ── Layout 1: sampler + storage ──
+	// 用于 downsample / upsample
+	std::array<VkDescriptorSetLayoutBinding, 2> samplerBinds{};
+	samplerBinds[0].binding = 0;
+	samplerBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	samplerBinds[0].descriptorCount = 1;
+	samplerBinds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	samplerBinds[1].binding = 1;
+	samplerBinds[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	samplerBinds[1].descriptorCount = 1;
+	samplerBinds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	layoutInfo.bindingCount = 2;
-	layoutInfo.pBindings = binds.data();
-	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bloomDescriptorSetLayout);
+	VkDescriptorSetLayoutCreateInfo samplerLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	samplerLayout.bindingCount = static_cast<uint32_t>(samplerBinds.size());
+	samplerLayout.pBindings = samplerBinds.data();
+	vkCreateDescriptorSetLayout(m_device, &samplerLayout, nullptr, &m_bloomDescriptorSetLayout);
 
-	
-    // Pipeline layout
-    VkPushConstantRange pcRange{};
-    pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pcRange.offset = 0;
-    pcRange.size = 16; // vec4
+	VkPipelineLayoutCreateInfo samplerPl{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	samplerPl.setLayoutCount = 1;
+	samplerPl.pSetLayouts = &m_bloomDescriptorSetLayout;
+	samplerPl.pushConstantRangeCount = 1;
+	samplerPl.pPushConstantRanges = &pcRange;
+	vkCreatePipelineLayout(m_device, &samplerPl, nullptr, &m_bloomPipelineLayout);
 
-	// Helper lambda to load spv and create compute pipeline
-	auto createPipeline = [&](const char* path) -> VkPipeline {
+	// ── Layout 2: storage + storage ──
+	// 用于 extract / composite（都读写 storage image）
+	std::array<VkDescriptorSetLayoutBinding, 2> storageBinds{};
+	storageBinds[0].binding = 0;
+	storageBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	storageBinds[0].descriptorCount = 1;
+	storageBinds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	storageBinds[1].binding = 1;
+	storageBinds[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	storageBinds[1].descriptorCount = 1;
+	storageBinds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutCreateInfo storageLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	storageLayout.bindingCount = static_cast<uint32_t>(storageBinds.size());
+	storageLayout.pBindings = storageBinds.data();
+	vkCreateDescriptorSetLayout(m_device, &storageLayout, nullptr, &m_bloomCompSetLayout);
+
+	VkPipelineLayoutCreateInfo storagePl{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	storagePl.setLayoutCount = 1;
+	storagePl.pSetLayouts = &m_bloomCompSetLayout;
+	storagePl.pushConstantRangeCount = 1;
+	storagePl.pPushConstantRanges = &pcRange;
+	vkCreatePipelineLayout(m_device, &storagePl, nullptr, &m_bloomCompPipelineLayout);
+
+	// ── 创建 4 个 pipeline ──
+	auto createPipeline = [&](const char* path, VkPipelineLayout layout) -> VkPipeline {
 		VkShaderModule mod;
 		if (!loadShaderModule(path, &mod))
 			throw std::runtime_error(std::string("failed to load ") + path);
 		ComputePipelineBuilder builder;
-		builder.m_pipelineLayout = m_bloomPipelineLayout;
+		builder.m_pipelineLayout = layout;
 		VkPipeline p = builder.buildComputePipeline(m_device, mod);
 		vkDestroyShaderModule(m_device, mod, nullptr);
 		return p;
 		};
 
-	m_bloomExtractPipeline = createPipeline("shaders/compute_shaders/bloom_extract.spv");
-	m_bloomDownsamplePipeline = createPipeline("shaders/compute_shaders/bloom_downsample.spv");
-	m_bloomUpsamplePipeline = createPipeline("shaders/compute_shaders/bloom_upsample.spv");
-	m_bloomCompositePipeline = createPipeline("shaders/compute_shaders/bloom_composite.spv");
-
+	m_bloomExtractPipeline		= createPipeline("shaders/compute_shaders/bloom_extract.spv", m_bloomCompPipelineLayout);
+	m_bloomDownsamplePipeline	= createPipeline("shaders/compute_shaders/bloom_downsample.spv", m_bloomPipelineLayout);
+	m_bloomUpsamplePipeline		= createPipeline("shaders/compute_shaders/bloom_upsample.spv", m_bloomPipelineLayout);
+	m_bloomCompositePipeline	= createPipeline("shaders/compute_shaders/bloom_composite.spv", m_bloomCompPipelineLayout);
 
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroyPipeline(m_device, m_bloomExtractPipeline, nullptr);
@@ -1552,10 +1575,10 @@ void ErisEngine::initBloomPipeline()
 		vkDestroyPipeline(m_device, m_bloomUpsamplePipeline, nullptr);
 		vkDestroyPipeline(m_device, m_bloomCompositePipeline, nullptr);
 		vkDestroyPipelineLayout(m_device, m_bloomPipelineLayout, nullptr);
+		vkDestroyPipelineLayout(m_device, m_bloomCompPipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_bloomDescriptorSetLayout, nullptr);
-		vkDestroyDescriptorSetLayout(m_device, m_hdrDescriptorSetLayout, nullptr);
-	});
-	
+		vkDestroyDescriptorSetLayout(m_device, m_bloomCompSetLayout, nullptr);
+		});
 }
 
 FrameData& ErisEngine::getCurrentFrame()
@@ -1601,7 +1624,7 @@ void ErisEngine::Eris_cleanup()
 	}
 }
 
-void ErisEngine:: cleanSwapchain()
+void ErisEngine::cleanSwapchain()
 {
 	// 显式销毁帧缓冲
 	if (m_viewportFramebuffer != VK_NULL_HANDLE) {
@@ -1671,7 +1694,7 @@ void ErisEngine:: cleanSwapchain()
 void ErisEngine::initVulkan()
 {
 	// 
-    // 1. 创建 Instance
+	// 1. 创建 Instance
 	createInstance();
 
 	// 2. 创建 Surface
@@ -1825,7 +1848,7 @@ void ErisEngine::initRenderPass()
 	subpass.colorAttachmentCount = static_cast<uint32_t>(colorRefs.size());
 	subpass.pColorAttachments = colorRefs.data();
 	subpass.pDepthStencilAttachment = &depthRef;
-	
+
 	// 4. 依赖关系 (保证上一帧写完后再读)
 	VkSubpassDependency dependency{};
 	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -1834,7 +1857,7 @@ void ErisEngine::initRenderPass()
 	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 	dependency.srcAccessMask = 0;
 	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	
+
 	// 5. 创建 RenderPass
 	VkRenderPassCreateInfo renderPassInfo{};
 	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -1865,13 +1888,13 @@ void ErisEngine::initUIRenderPass() {
 	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 最终给显示器
 
 	// 2. 深度附件 (Attachment 1) - 即使 UI 不用，也必须声明以保持兼容
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = m_depthFormat; // 确保使用和你主 Pass 一样的深度格式
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;  // UI 不关心深度内容
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	VkAttachmentDescription depthAttachment{};
+	depthAttachment.format = m_depthFormat; // 确保使用和你主 Pass 一样的深度格式
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;  // UI 不关心深度内容
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 
 	VkAttachmentReference colorRef = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
@@ -1890,8 +1913,8 @@ void ErisEngine::initUIRenderPass() {
 	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 	dependency.srcAccessMask = 0;
 	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	
-	
+
+
 	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
 	VkRenderPassCreateInfo createInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 	createInfo.attachmentCount = 2;
@@ -1914,8 +1937,8 @@ void ErisEngine::initViewportPass()
 {
 	// 1. 颜色附件 (最终合成后的画面)
 	VkAttachmentDescription colorAttachment{};
-	colorAttachment.format = m_swapchainImageFormat;
-	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	colorAttachment.samples = msaaSamples;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -1967,8 +1990,8 @@ void ErisEngine::initViewportForwardPass()
 {
 	// 1. 颜色附件 (最终合成后的画面)
 	VkAttachmentDescription colorAttachment{};
-	colorAttachment.format = m_swapchainImageFormat;
-	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	colorAttachment.samples = msaaSamples;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -2016,7 +2039,7 @@ void ErisEngine::initViewportForwardPass()
 		});
 }
 
-bool ErisEngine:: checkValidationLayerSupport() 
+bool ErisEngine::checkValidationLayerSupport()
 {
 	uint32_t layerCount;
 	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -2069,7 +2092,7 @@ SwapChainSupportDetails ErisEngine::querySwapChainSupport(VkPhysicalDevice devic
 
 
 void ErisEngine::createDepthBuffer()
-{ 
+{
 	// 1. 确定格式和尺寸
 	m_depthFormat = findDepthFormat();
 
@@ -2093,7 +2116,7 @@ void ErisEngine::createDepthBuffer()
 
 	// 3. 配置 VMA 内存分配信息 (VmaAllocationCreateInfo)
 	// 这取代了教程中的 VkMemoryAllocateInfo
-	VmaAllocationCreateInfo depthAllocInfo{};	
+	VmaAllocationCreateInfo depthAllocInfo{};
 	depthAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;	// 告诉 VMA 这块内存在显存中
 	depthAllocInfo.requiredFlags = (VkMemoryPropertyFlags)VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
@@ -2218,6 +2241,7 @@ void ErisEngine::createLogicalDevice()
 
 	VkPhysicalDeviceFeatures deviceFeatures{};
 	deviceFeatures.samplerAnisotropy = VK_TRUE;
+	deviceFeatures.fragmentStoresAndAtomics = VK_TRUE;
 
 	VkDeviceCreateInfo createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -2355,7 +2379,7 @@ void ErisEngine::createInstance()
 }
 
 
-AllocatedBuffer ErisEngine::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) 
+AllocatedBuffer ErisEngine::createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
 {
 	VkBufferCreateInfo bufferInfo{};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -2384,7 +2408,7 @@ AllocatedBuffer ErisEngine::createBuffer(size_t allocSize, VkBufferUsageFlags us
 
 }
 
-void ErisEngine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) 
+void ErisEngine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function)
 {
 	// 1. 分配临时的命令缓冲
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -2426,7 +2450,7 @@ void ErisEngine::initDescriptors() {
 	// ---------------------------------------------------------
 	VkDescriptorSetLayoutBinding sceneBinds[2];
 
-    // Binding 0: 全局 UBO 数据
+	// Binding 0: 全局 UBO 数据
 	sceneBinds[0].binding = 0;
 	sceneBinds[0].descriptorCount = 1;
 	sceneBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -2475,7 +2499,7 @@ void ErisEngine::initDescriptors() {
 
 	VkDescriptorSetLayoutCreateInfo skyInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	skyInfo.bindingCount = 1;
-	skyInfo.pBindings = &skyboxBind; 
+	skyInfo.pBindings = &skyboxBind;
 	if (vkCreateDescriptorSetLayout(m_device, &skyInfo, nullptr, &m_skyboxDescriptorSetLayout) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create skybox descriptor set layout!");
 	}
@@ -2585,7 +2609,7 @@ void ErisEngine::initDescriptors() {
 
 	VkDescriptorSetLayoutBinding aoLumenBind{};
 	aoLumenBind.binding = 7;
-	aoLumenBind.descriptorType= VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	aoLumenBind.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	aoLumenBind.descriptorCount = 1;
 	aoLumenBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	lumenBinds.push_back(aoLumenBind);
@@ -2595,17 +2619,7 @@ void ErisEngine::initDescriptors() {
 	lumenLayoutInfo.pBindings = lumenBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &lumenLayoutInfo, nullptr, &m_lumenDescriptorLayout);
 
-	// --- HDR storage image set (set = 2) ---
-	VkDescriptorSetLayoutBinding hdrBind{};
-	hdrBind.binding = 0;
-	hdrBind.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	hdrBind.descriptorCount = 1;
-	hdrBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-	VkDescriptorSetLayoutCreateInfo hdrLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	hdrLayoutInfo.bindingCount = 1;
-	hdrLayoutInfo.pBindings = &hdrBind;
-	vkCreateDescriptorSetLayout(m_device, &hdrLayoutInfo, nullptr, &m_hdrDescriptorSetLayout);
 
 	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
 	m_mainDeletionQueue.push_function([=]() {
@@ -2616,7 +2630,6 @@ void ErisEngine::initDescriptors() {
 		vkDestroyDescriptorSetLayout(m_device, m_skyboxDescriptorSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_lumenDescriptorLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_iblDescriptorSetLayout, nullptr);
-		vkDestroyDescriptorSetLayout(m_device, m_hdrDescriptorSetLayout, nullptr);
 		});
 }
 
@@ -2749,10 +2762,10 @@ void ErisEngine::initGbuffer()
 		vkDestroyFramebuffer(m_device, m_gbufferFramebuffer, nullptr);
 		vkDestroyImageView(m_device, m_gbuffer.position.imageView, nullptr);
 		vmaDestroyImage(m_allocator, m_gbuffer.position.image, m_gbuffer.position.allocation);
-										
+
 		vkDestroyImageView(m_device, m_gbuffer.normal.imageView, nullptr);
 		vmaDestroyImage(m_allocator, m_gbuffer.normal.image, m_gbuffer.normal.allocation);
-										
+
 		vkDestroyImageView(m_device, m_gbuffer.albedo.imageView, nullptr);
 		vmaDestroyImage(m_allocator, m_gbuffer.albedo.image, m_gbuffer.albedo.allocation);
 		});
@@ -2934,24 +2947,90 @@ void ErisEngine::updateForwardIBLDescriptorSet()
 
 void ErisEngine::updateBloomDescriptorSets()
 {
-	// HDR set (set=2, for main.frag to write into)
-	VkDescriptorSetAllocateInfo	dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	dsAlloc.descriptorPool = m_descriptorPool;
-	dsAlloc.descriptorSetCount = 1;
-	dsAlloc.pSetLayouts = &m_hdrDescriptorSetLayout;
-	vkAllocateDescriptorSets(m_device, &dsAlloc, &m_bloomHdrSet);
+	// ── Bloom dispatch sets ──
+	for (int i = 0; i < 3; i++) {
+		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		alloc.descriptorPool = m_descriptorPool;
+		alloc.descriptorSetCount = 1;
+		alloc.pSetLayouts = &m_bloomDescriptorSetLayout;
 
-	VkDescriptorImageInfo hdrInfo{};
-	hdrInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-	hdrInfo.imageView = m_bloomHdrImage.imageView;
+		// downsample: mip[i](sampler) → mip[i+1](storage)
+		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomDownsampleSets[i]);
+		VkDescriptorImageInfo sSrc{}, sDst{};
+		sSrc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		sSrc.imageView = m_bloomMipChain[i].imageView;
+		sSrc.sampler = m_sampler;
+		sDst.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		sDst.imageView = m_bloomMipChain[i + 1].imageView;
+		VkWriteDescriptorSet sw[2] = {};
+		sw[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		sw[0].dstSet = m_bloomDownsampleSets[i]; sw[0].dstBinding = 0;
+		sw[0].descriptorCount = 1; sw[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		sw[0].pImageInfo = &sSrc;
+		sw[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		sw[1].dstSet = m_bloomDownsampleSets[i]; sw[1].dstBinding = 1;
+		sw[1].descriptorCount = 1; sw[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		sw[1].pImageInfo = &sDst;
+		vkUpdateDescriptorSets(m_device, 2, sw, 0, nullptr);
 
-	VkWriteDescriptorSet hdrWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-	hdrWrite.dstSet = m_bloomHdrSet;
-	hdrWrite.dstBinding = 0;
-	hdrWrite.descriptorCount = 1;
-	hdrWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	hdrWrite.pImageInfo = &hdrInfo;
-	vkUpdateDescriptorSets(m_device, 1, &hdrWrite, 0, nullptr);
+		// upsample: mip[i+1](sampler) → mip[i](storage, 累加)
+		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomUpsampleSets[i]);
+		VkDescriptorImageInfo uSrc{}, uDst{};
+		uSrc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		uSrc.imageView = m_bloomMipChain[i + 1].imageView;
+		uSrc.sampler = m_sampler;
+		uDst.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		uDst.imageView = m_bloomMipChain[i].imageView;
+		sw[0].dstSet = m_bloomUpsampleSets[i]; sw[0].pImageInfo = &uSrc;
+		sw[1].dstSet = m_bloomUpsampleSets[i]; sw[1].pImageInfo = &uDst;
+		vkUpdateDescriptorSets(m_device, 2, sw, 0, nullptr);
+	}
+	// extract: HDR(storage) → bloom_full(storage)
+	{
+		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		alloc.descriptorPool = m_descriptorPool;
+		alloc.descriptorSetCount = 1;
+		alloc.pSetLayouts = &m_bloomCompSetLayout;
+		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomExtractSet);
+		VkDescriptorImageInfo eSrc{}, eDst{};
+		eSrc.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		eSrc.imageView = m_viewportImage.imageView;
+		eDst.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		eDst.imageView = m_bloomMipChain[0].imageView;
+		VkWriteDescriptorSet ew[2] = {};
+		ew[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		ew[0].dstSet = m_bloomExtractSet; ew[0].dstBinding = 0;
+		ew[0].descriptorCount = 1; ew[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		ew[0].pImageInfo = &eSrc;
+		ew[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		ew[1].dstSet = m_bloomExtractSet; ew[1].dstBinding = 1;
+		ew[1].descriptorCount = 1; ew[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		ew[1].pImageInfo = &eDst;
+		vkUpdateDescriptorSets(m_device, 2, ew, 0, nullptr);
+	}
+	// composite: HDR(storage) + bloom_full(storage) → HDR(storage)
+	{
+		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		alloc.descriptorPool = m_descriptorPool;
+		alloc.descriptorSetCount = 1;
+		alloc.pSetLayouts = &m_bloomCompSetLayout;
+		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomCompositeSet);
+		VkDescriptorImageInfo cHdr{}, cBlo{};
+		cHdr.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		cHdr.imageView = m_viewportImage.imageView;
+		cBlo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		cBlo.imageView = m_bloomMipChain[0].imageView;
+		VkWriteDescriptorSet cw[2] = {};
+		cw[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		cw[0].dstSet = m_bloomCompositeSet; cw[0].dstBinding = 0;
+		cw[0].descriptorCount = 1; cw[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		cw[0].pImageInfo = &cHdr;
+		cw[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		cw[1].dstSet = m_bloomCompositeSet; cw[1].dstBinding = 1;
+		cw[1].descriptorCount = 1; cw[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		cw[1].pImageInfo = &cBlo;
+		vkUpdateDescriptorSets(m_device, 2, cw, 0, nullptr);
+	}
 
 }
 
@@ -2964,7 +3043,7 @@ void ErisEngine::initLumenLightingPipeline()
 	}
 
 	// 布局设计：Set 0 是全局数据(SceneData), Set 1 是 GBuffer
-	std::array<VkDescriptorSetLayout, 3> layouts = { m_globalSetLayout, m_lumenDescriptorLayout, m_hdrDescriptorSetLayout };
+	std::array<VkDescriptorSetLayout, 2> layouts = { m_globalSetLayout, m_lumenDescriptorLayout };
 
 	VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
@@ -3022,7 +3101,7 @@ void ErisEngine::initLumenLightingPipeline()
 
 
 	builder.m_pipelineLayout = m_lumenLightingPipelineLayout;
-	m_lumenLightingPipeline = builder.buildPipeline(m_device, m_viewportPass); 
+	m_lumenLightingPipeline = builder.buildPipeline(m_device, m_viewportPass);
 
 	vkDestroyShaderModule(m_device, vertMod, nullptr);
 	vkDestroyShaderModule(m_device, fragMod, nullptr);
@@ -3159,7 +3238,7 @@ void ErisEngine::executeShadowPass(VkCommandBuffer cmd) {
 
 	// --- 2. 执行绘制 ---
 	vkCmdBeginRenderPass(cmd, &shadowRpInfo, VK_SUBPASS_CONTENTS_INLINE);
-		drawShadow(cmd); 
+	drawShadow(cmd);
 	vkCmdEndRenderPass(cmd);
 
 	// --- 3. 显式同步：阴影写完后转为 Shader 可读 ---
@@ -3172,7 +3251,7 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// --- 1. 同步：将视口图从“读取”转为“写入”状态 ---
 	transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1,1,0);
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 1, 0);
 
 	// --- 2. 配置清除值 (1个背景色 + 1个深度) ---
 	std::array<VkClearValue, 2> clears{};
@@ -3201,17 +3280,17 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// --- 4. 执行绘制流程 ---
 	vkCmdBeginRenderPass(cmd, &sceneRpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// A. 画模型 (使用 Forward 专用管线)
+	// A. 画模型 (使用 Forward 专用管线)
 
-		// 绑定 IBL 描述符集 (Set 2)
-		
-		drawMainGeometry(cmd, m_pipeline, m_pipelineLayout);
+	// 绑定 IBL 描述符集 (Set 2)
 
-		// B. 画天空盒
-		drawSkybox(cmd);
+	drawMainGeometry(cmd, m_pipeline, m_pipelineLayout);
 
-		// C. 画网格
-		drawGrid(cmd);
+	// B. 画天空盒
+	drawSkybox(cmd);
+
+	// C. 画网格
+	drawGrid(cmd);
 
 	vkCmdEndRenderPass(cmd);
 
@@ -3219,7 +3298,7 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// (因为 m_viewportPass 的 finalLayout 已经配置好了，此处无需手动转换)
 	transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1,1,0);
+		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1, 1, 0);
 }
 
 void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
@@ -3265,7 +3344,7 @@ void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
 	// 6. AO 图 → SHADER_READ_ONLY 供 fragment shader 采样
 	transitionImageLayout(cmd, m_aoImage.image, VK_FORMAT_R8_UNORM,
 		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
-	
+
 	transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1, 1, 0);
@@ -3273,7 +3352,80 @@ void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
 
 void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 {
+	uint32_t w = m_swapchainExtent.width, h = m_swapchainExtent.height;
+	struct { int x, y; } mipSize[4] = {
+		{(int)w, (int)h},
+		{std::max(1, (int)(w / 2)), std::max(1, (int)(h / 2))},
+		{std::max(1, (int)(w / 4)), std::max(1, (int)(h / 4))},
+		{std::max(1, (int)(w / 8)), std::max(1, (int)(h / 8))}
+	};
 
+	// 1. 转 viewportImage → GENERAL 以供 compute 读写
+	transitionImageLayout(cmd, m_viewportImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+
+	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+	// 2. Extract: viewportImage → mip[0]
+	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+	{
+		float threshold = 0.5f;
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomExtractPipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomExtractSet, 0, nullptr);
+		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &threshold);
+		vkCmdDispatch(cmd, (mipSize[0].x + 15) / 16, (mipSize[0].y + 15) / 16, 1);
+	}
+	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+
+	// 3. Downsample ×3
+	for (int i = 0; i < 3; i++) {
+		transitionImageLayout(cmd, m_bloomMipChain[i + 1].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomDownsamplePipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomPipelineLayout, 0, 1, &m_bloomDownsampleSets[i], 0, nullptr);
+		vkCmdDispatch(cmd, (mipSize[i + 1].x + 15) / 16, (mipSize[i + 1].y + 15) / 16, 1);
+		transitionImageLayout(cmd, m_bloomMipChain[i + 1].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+	}
+
+	// 4. Upsample ×3
+	for (int i = 2; i >= 0; i--) {
+		transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomUpsamplePipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomPipelineLayout, 0, 1, &m_bloomUpsampleSets[i], 0, nullptr);
+		vkCmdDispatch(cmd, (mipSize[i].x + 15) / 16, (mipSize[i].y + 15) / 16, 1);
+		transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+			VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+	}
+
+	// 5. Composite: bloom 叠加回 viewportImage
+	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+	{
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+		float intensity = 1.0f;
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompositePipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomCompositeSet, 0, nullptr);
+		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &intensity);
+		vkCmdDispatch(cmd, (w + 15) / 16, (h + 15) / 16, 1);
+	}
+	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+
+	// 6. viewportImage 转回 SHADER_READ_ONLY
+	transitionImageLayout(cmd, m_viewportImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+
+	// 7. Barrier: compute → fragment
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 
@@ -3289,7 +3441,7 @@ void ErisEngine::drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_
 	executeEditorUIPass(cmd, imageIndex);
 }
 
-void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t imageIndex)
+void ErisEngine::drawLumenFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex)
 {
 	// ---------------------------------------------------------
 	// 【PASS 0: 阴影渲染】
@@ -3318,19 +3470,19 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 
 
 	// ---------------------------------------------------------
-    // 【PASS 5: UI Pass - 叠加 ImGui 界面到最终交换链】
-    // ---------------------------------------------------------
+	// 【PASS 5: UI Pass - 叠加 ImGui 界面到最终交换链】
+	// ---------------------------------------------------------
 	executeEditorUIPass(cmd, imageIndex);
-	
+
 }
 
 
 void ErisEngine::drawFrame()
 {
-	
+
 	static auto lastTime = std::chrono::high_resolution_clock::now();
-	auto currentTime= std::chrono::high_resolution_clock::now();
-	float deltaTime= std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
 	lastTime = currentTime;
 
 	if (m_activeWorld) {
@@ -3352,7 +3504,7 @@ void ErisEngine::drawFrame()
 
 	vkResetFences(m_device, 1, &frame.m_renderFence);
 	vkResetCommandPool(m_device, frame.m_commandPool, 0);
-	
+
 
 	m_editor->render_editor(this);
 	float aspect = (float)m_swapchainExtent.width / (float)m_swapchainExtent.height;
@@ -3377,7 +3529,7 @@ void ErisEngine::drawFrame()
 	// 2. 将数据写入本帧的 UBO 内存
 	void* data;
 	vmaMapMemory(m_allocator, frame.sceneBuffer.allocation, &data);
-		memcpy(data, &m_sceneData, sizeof(GPUSceneData));
+	memcpy(data, &m_sceneData, sizeof(GPUSceneData));
 	vmaUnmapMemory(m_allocator, frame.sceneBuffer.allocation);
 
 	VkCommandBuffer cmd = frame.m_mainCommandBuffer;
@@ -3389,7 +3541,7 @@ void ErisEngine::drawFrame()
 	}
 
 
-	if (m_activePath == RenderPath::Forward){
+	if (m_activePath == RenderPath::Forward) {
 		drawForwardFrame(cmd, frame, imageIndex);
 	}
 	else {
@@ -3522,7 +3674,8 @@ void ErisEngine::handleInput(float deltaTime)
 void ErisEngine::initViewportResources()
 {
 	// 1. 创建离屏图像 (m_viewportImage)
-	VkFormat colorFormat= m_swapchainImageFormat;
+	// VkFormat colorFormat = m_swapchainImageFormat;
+	VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 	VkExtent3D extent = { m_swapchainExtent.width, m_swapchainExtent.height, 1 };
 
 	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -3531,9 +3684,9 @@ void ErisEngine::initViewportResources()
 	imgInfo.extent = extent;
 	imgInfo.mipLevels = 1;
 	imgInfo.arrayLayers = 1;
-	imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imgInfo.samples = msaaSamples;
 	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-	imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
 	VmaAllocationCreateInfo allocationInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 	if (vmaCreateImage(m_allocator, &imgInfo, &allocationInfo,
@@ -3605,7 +3758,7 @@ bool ErisEngine::loadMeshFromFile(const std::string& filename, Mesh& outMesh)
 		aiProcess_CalcTangentSpace |
 		aiProcess_JoinIdenticalVertices
 	);
-	
+
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 		std::cerr << "ASSIP ERROR: " << importer.GetErrorString() << std::endl;
 		return false;
@@ -3619,7 +3772,7 @@ bool ErisEngine::loadMeshFromFile(const std::string& filename, Mesh& outMesh)
 	for (uint32_t i = 0; i < mesh->mNumVertices; i++) {
 		Vertex vertex;
 		vertex.pos = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
-		
+
 		if (mesh->HasNormals()) {
 			vertex.normal = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
 		}
@@ -3697,7 +3850,7 @@ bool ErisEngine::loadModelFromFile(const std::string& filename, Model& outModel)
 			engineMat.diffuseTexture = loadImageFromFile(fullTexPath.c_str());
 			engineMat.textureSet = createDescriptorSet(engineMat.diffuseTexture);
 		}
-		
+
 
 		outModel.materials.push_back(engineMat);
 	}
@@ -3824,7 +3977,7 @@ AllocatedImage ErisEngine::loadImageFromFile(const char* file)
 	// 4. 将数据从 Buffer 拷贝到 Image (利用 immediateSubmit)
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		// A. 转换布局：Undefined -> Transfer Destination (准备接收数据)
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
 
 		// B. 执行拷贝
 		VkBufferImageCopy copyRegion{};
@@ -3840,7 +3993,7 @@ AllocatedImage ErisEngine::loadImageFromFile(const char* file)
 		vkCmdCopyBufferToImage(cmd, stagingbuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
 		// C. 转换布局：Transfer Destination -> Shader Read Only (准备给 Shader 用)
-		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,1);
+		transitionImageLayout(cmd, newImage.image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 		});
 
 	// 5. 创建 Image View
@@ -3902,7 +4055,7 @@ void ErisEngine::initDefaultResources() {
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		// A. 转换布局为接收端
 		transitionImageLayout(cmd, m_defaultTexture.image, VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1);
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
 
 		// B. 拷贝缓冲区到图像
 		VkBufferImageCopy copyRegion{};
@@ -3942,7 +4095,7 @@ void ErisEngine::initDefaultResources() {
 void ErisEngine::initSceneData()
 {
 	memset(&m_sceneData, 0, sizeof(GPUSceneData));
-	
+
 	m_sceneData.fogColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
 	m_sceneData.ambientColor = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
 	m_sceneData.sunlightDir = glm::vec4(0.5f, 1.0f, 0.3f, 1.0f);
@@ -4130,6 +4283,17 @@ void ErisEngine::executeLumenCompositionPass(VkCommandBuffer cmd) {
 		drawGrid(cmd);          // 叠加无限网格
 
 	vkCmdEndRenderPass(cmd);
+
+	// --- Barrier: 确保 main.frag 对 hdrImage 的 imageStore 完成 ---
+	// render pass 的隐式 subpass dependency 只覆盖 attachments，不覆盖 storage image
+	VkMemoryBarrier hdrBarrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	hdrBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	vkCmdPipelineBarrier(cmd,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 1, &hdrBarrier, 0, nullptr, 0, nullptr);
+
 }
 void ErisEngine::executeGBufferPass(VkCommandBuffer cmd) {
 	// --- 1. 显式初始化 4 个清除值 ---
@@ -4162,7 +4326,7 @@ void ErisEngine::executeGBufferPass(VkCommandBuffer cmd) {
 	// --- 3. 执行绘制 ---
 	vkCmdBeginRenderPass(cmd, &gbufferRpInfo, VK_SUBPASS_CONTENTS_INLINE);
 	// 使用 Lumen GBuffer 专用管线绘制物体
-		drawMainGeometry(cmd, m_lumenGbufferPipeline, m_lumenGbufferPipelineLayout);
+	drawMainGeometry(cmd, m_lumenGbufferPipeline, m_lumenGbufferPipelineLayout);
 	vkCmdEndRenderPass(cmd);
 }
 void ErisEngine::executeEditorUIPass(VkCommandBuffer cmd, uint32_t imageIndex) {
@@ -4181,7 +4345,7 @@ void ErisEngine::executeEditorUIPass(VkCommandBuffer cmd, uint32_t imageIndex) {
 	uiRpInfo.pClearValues = uiClears.data();
 
 	vkCmdBeginRenderPass(cmd, &uiRpInfo, VK_SUBPASS_CONTENTS_INLINE);
-		m_editor->draw(cmd); // 绘制编辑器界面	
+	m_editor->draw(cmd); // 绘制编辑器界面	
 	vkCmdEndRenderPass(cmd);
 }
 void ErisEngine::drawMainGeometry(VkCommandBuffer cmd, VkPipeline pipeline, VkPipelineLayout layout)
@@ -4379,7 +4543,7 @@ void ErisEngine::drawLumenLighting(VkCommandBuffer cmd)
 	// Set 0: Scene, Set 1: GBuffer, Set 2: HDR image
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 1, 1, &m_lumenDescriptorSet, 0, nullptr);
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 2, 1, &m_bloomHdrSet, 0, nullptr);
+
 	// 直接画 3 个顶点生成全屏三角形
 	vkCmdDraw(cmd, 3, 1, 0, 0);
 }
