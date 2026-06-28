@@ -85,7 +85,7 @@ public:
 	};
 	ErisEngine()
 		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr), m_selectedObject(nullptr),
-		m_framebufferResized(false), m_isMousePressed(false)
+		m_framebufferResized(false), m_isMousePressed(false), m_bloomThreshold(0.5f), m_bloomIntensity(1.0f)
 	{}
 
 	int Eris_init();
@@ -103,6 +103,10 @@ private:
 	VkViewport m_viewport;
 	VkRect2D m_scissor;
 	double m_lastX, m_lastY;
+
+	// bloom parameters
+	float m_bloomThreshold;
+	float m_bloomIntensity;
 
 	RenderPath m_activePath = RenderPath::Lumen;
 

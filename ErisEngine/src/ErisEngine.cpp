@@ -3372,7 +3372,7 @@ void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
 	{
-		float threshold = 0.5f;
+		float threshold = m_bloomThreshold;
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomExtractPipeline);
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomExtractSet, 0, nullptr);
 		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &threshold);
@@ -3410,7 +3410,7 @@ void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
 	{
 		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-		float intensity = 1.0f;
+		float intensity = m_bloomIntensity;
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompositePipeline);
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomCompositeSet, 0, nullptr);
 		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &intensity);
