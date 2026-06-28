@@ -70,15 +70,16 @@ int ErisEngine::Eris_init()
 	initGbuffer();
 
 	initDescriptors();
+	initBloomResources();
 	initDescriptorPool();
 
 
 
 	initGTAOPipeline();
+	initBloomPipeline();
 	initForwardPipeline();
 	initLumenGbufferPipeline();
 	initLumenLightingPipeline();
-
 	initSkyboxPipeline();
 	initGridPipeline();
 	initShadowResources();
@@ -123,6 +124,7 @@ int ErisEngine::Eris_init()
 	updateSkyboxDescriptor();
 	updateLumenDescriptorSet();
 	updateForwardIBLDescriptorSet();
+	updateBloomDescriptorSets();
 
 	Model* pSportCar = getOrLoadModel("assets/sportsCar/sportsCar.obj");
 	Model* pGroundAsset = getOrLoadModel("assets/ground/churchfloor.obj");
@@ -753,6 +755,9 @@ void ErisEngine::recreateSwapchain()
 	initViewportResources();
 	initAOResources();
 	initGbuffer();
+	initBloomResources();
+
+	updateBloomDescriptorSets();
 	updateLumenDescriptorSet();
 	updateForwardIBLDescriptorSet();
 	ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(m_swapchainImages.size()));
@@ -945,6 +950,48 @@ void ErisEngine::initAOResources()
 		vkDestroyImageView(m_device, m_aoImage.imageView, nullptr);
 		vmaDestroyImage(m_allocator, m_aoImage.image, m_aoImage.allocation);
 		});
+}
+
+void ErisEngine::initBloomResources()
+{
+	VkExtent3D extent = { m_swapchainExtent.width,m_swapchainExtent.height,1 };
+
+	// HDR scene image
+	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imgInfo.imageType = VK_IMAGE_TYPE_2D;
+	imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	imgInfo.extent = extent;
+	imgInfo.mipLevels = 1;
+	imgInfo.arrayLayers = 1;
+	imgInfo.samples = msaaSamples;
+	imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
+	vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_bloomHdrImage.image, &m_bloomHdrImage.allocation, nullptr);
+	m_bloomHdrImage.imageView = createImageView(m_bloomHdrImage.image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+
+
+	for (int i = 0; i < 4; i++) {
+		int d = 1 << i;
+		VkExtent3D mipExt{ std::max(1u, extent.width / d), std::max(1u, extent.height / d), 1 };
+		VkImageCreateInfo mipInfo = imgInfo;
+		mipInfo.extent = mipExt;
+		vmaCreateImage(m_allocator, &mipInfo, &allocInfo,
+			&m_bloomMipChain[i].image, &m_bloomMipChain[i].allocation, nullptr);
+		m_bloomMipChain[i].imageView = createImageView(
+			m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+	}
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyImageView(m_device, m_bloomHdrImage.imageView, nullptr);
+		vmaDestroyImage(m_allocator, m_bloomHdrImage.image, m_bloomHdrImage.allocation);
+		for (int i = 0; i < 4; i++) {
+			vkDestroyImageView(m_device, m_bloomMipChain[i].imageView, nullptr);
+			vmaDestroyImage(m_allocator, m_bloomMipChain[i].image, m_bloomMipChain[i].allocation);
+		}
+	});
+
 }
 
 void ErisEngine::initSkyboxMesh()
@@ -1395,7 +1442,7 @@ void ErisEngine::initGTAOPipeline()
 {
 	// 1. 加载 compute shader
 	VkShaderModule compModule;
-	if (!loadShaderModule("shaders/gtao.spv", &compModule)) {
+	if (!loadShaderModule("shaders/compute_shaders/gtao.spv", &compModule)) {
 		throw std::runtime_error("failed to load gtao compute shader!");
 	}
 
@@ -1452,6 +1499,63 @@ void ErisEngine::initGTAOPipeline()
         vkDestroyPipelineLayout(m_device, m_gtaoPipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_gtaoDescriptorSetLayout, nullptr);
     });
+}
+
+void ErisEngine::initBloomPipeline()
+{
+	// 通用 pipeline layout: set=0, binding=0 (input storage/sampler), binding=1 (output storage)
+	// extract/composite/upsample/downsample 都用不同的 pipeline 但 layout 可以统一
+	std::array<VkDescriptorSetLayoutBinding, 2>binds{};
+	binds[0].binding = 0;
+	binds[0].descriptorCount = 1;
+	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	binds[1].binding = 1;
+	binds[1].descriptorCount = 1;
+	binds[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	binds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	layoutInfo.bindingCount = 2;
+	layoutInfo.pBindings = binds.data();
+	vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bloomDescriptorSetLayout);
+
+	
+    // Pipeline layout
+    VkPushConstantRange pcRange{};
+    pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pcRange.offset = 0;
+    pcRange.size = 16; // vec4
+
+	// Helper lambda to load spv and create compute pipeline
+	auto createPipeline = [&](const char* path) -> VkPipeline {
+		VkShaderModule mod;
+		if (!loadShaderModule(path, &mod))
+			throw std::runtime_error(std::string("failed to load ") + path);
+		ComputePipelineBuilder builder;
+		builder.m_pipelineLayout = m_bloomPipelineLayout;
+		VkPipeline p = builder.buildComputePipeline(m_device, mod);
+		vkDestroyShaderModule(m_device, mod, nullptr);
+		return p;
+		};
+
+	m_bloomExtractPipeline = createPipeline("shaders/compute_shaders/bloom_extract.spv");
+	m_bloomDownsamplePipeline = createPipeline("shaders/compute_shaders/bloom_downsample.spv");
+	m_bloomUpsamplePipeline = createPipeline("shaders/compute_shaders/bloom_upsample.spv");
+	m_bloomCompositePipeline = createPipeline("shaders/compute_shaders/bloom_composite.spv");
+
+
+	m_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipeline(m_device, m_bloomExtractPipeline, nullptr);
+		vkDestroyPipeline(m_device, m_bloomDownsamplePipeline, nullptr);
+		vkDestroyPipeline(m_device, m_bloomUpsamplePipeline, nullptr);
+		vkDestroyPipeline(m_device, m_bloomCompositePipeline, nullptr);
+		vkDestroyPipelineLayout(m_device, m_bloomPipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_bloomDescriptorSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_hdrDescriptorSetLayout, nullptr);
+	});
+	
 }
 
 FrameData& ErisEngine::getCurrentFrame()
@@ -2491,6 +2595,17 @@ void ErisEngine::initDescriptors() {
 	lumenLayoutInfo.pBindings = lumenBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &lumenLayoutInfo, nullptr, &m_lumenDescriptorLayout);
 
+	// --- HDR storage image set (set = 2) ---
+	VkDescriptorSetLayoutBinding hdrBind{};
+	hdrBind.binding = 0;
+	hdrBind.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	hdrBind.descriptorCount = 1;
+	hdrBind.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutCreateInfo hdrLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	hdrLayoutInfo.bindingCount = 1;
+	hdrLayoutInfo.pBindings = &hdrBind;
+	vkCreateDescriptorSetLayout(m_device, &hdrLayoutInfo, nullptr, &m_hdrDescriptorSetLayout);
 
 	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
 	m_mainDeletionQueue.push_function([=]() {
@@ -2501,6 +2616,7 @@ void ErisEngine::initDescriptors() {
 		vkDestroyDescriptorSetLayout(m_device, m_skyboxDescriptorSetLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_lumenDescriptorLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_iblDescriptorSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_device, m_hdrDescriptorSetLayout, nullptr);
 		});
 }
 
@@ -2816,6 +2932,29 @@ void ErisEngine::updateForwardIBLDescriptorSet()
 	vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(iblWrites.size()), iblWrites.data(), 0, nullptr);
 }
 
+void ErisEngine::updateBloomDescriptorSets()
+{
+	// HDR set (set=2, for main.frag to write into)
+	VkDescriptorSetAllocateInfo	dsAlloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dsAlloc.descriptorPool = m_descriptorPool;
+	dsAlloc.descriptorSetCount = 1;
+	dsAlloc.pSetLayouts = &m_hdrDescriptorSetLayout;
+	vkAllocateDescriptorSets(m_device, &dsAlloc, &m_bloomHdrSet);
+
+	VkDescriptorImageInfo hdrInfo{};
+	hdrInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	hdrInfo.imageView = m_bloomHdrImage.imageView;
+
+	VkWriteDescriptorSet hdrWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	hdrWrite.dstSet = m_bloomHdrSet;
+	hdrWrite.dstBinding = 0;
+	hdrWrite.descriptorCount = 1;
+	hdrWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	hdrWrite.pImageInfo = &hdrInfo;
+	vkUpdateDescriptorSets(m_device, 1, &hdrWrite, 0, nullptr);
+
+}
+
 void ErisEngine::initLumenLightingPipeline()
 {
 	// 加载我们刚写的 lumen_lighting.vert 和 lumen_main.frag
@@ -2825,7 +2964,7 @@ void ErisEngine::initLumenLightingPipeline()
 	}
 
 	// 布局设计：Set 0 是全局数据(SceneData), Set 1 是 GBuffer
-	std::array<VkDescriptorSetLayout, 2> layouts = { m_globalSetLayout, m_lumenDescriptorLayout };
+	std::array<VkDescriptorSetLayout, 3> layouts = { m_globalSetLayout, m_lumenDescriptorLayout, m_hdrDescriptorSetLayout };
 
 	VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
@@ -3132,6 +3271,11 @@ void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1, 1, 0);
 }
 
+void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
+{
+
+}
+
 
 void ErisEngine::drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex)
 {
@@ -3168,8 +3312,14 @@ void ErisEngine::drawLumenFrame(VkCommandBuffer cmd,FrameData& frame, uint32_t i
 	executeLumenCompositionPass(cmd);
 
 	// ---------------------------------------------------------
-   // 【PASS 4: UI Pass - 叠加 ImGui 界面到最终交换链】
-   // ---------------------------------------------------------
+	// 【PASS 4: Bloom Pass - 高光溢光 计算】
+	// ---------------------------------------------------------
+	executeBloomPass(cmd);
+
+
+	// ---------------------------------------------------------
+    // 【PASS 5: UI Pass - 叠加 ImGui 界面到最终交换链】
+    // ---------------------------------------------------------
 	executeEditorUIPass(cmd, imageIndex);
 	
 }
@@ -4226,10 +4376,10 @@ void ErisEngine::drawLumenLighting(VkCommandBuffer cmd)
 	FrameData& frame = getCurrentFrame();
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipeline);
 
-	// Set 0: Scene, Set 1: GBuffer
+	// Set 0: Scene, Set 1: GBuffer, Set 2: HDR image
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 1, 1, &m_lumenDescriptorSet, 0, nullptr);
-
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 2, 1, &m_bloomHdrSet, 0, nullptr);
 	// 直接画 3 个顶点生成全屏三角形
 	vkCmdDraw(cmd, 3, 1, 0, 0);
 }

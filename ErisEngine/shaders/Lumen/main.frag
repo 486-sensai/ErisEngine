@@ -37,6 +37,8 @@ layout(set = 1, binding = 5) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 6) uniform samplerCube prefilteredMap;
 layout(set = 1, binding = 7) uniform sampler2D aoTexture;
 
+layout(set = 2, binding = 0, rgba16f) uniform image2D hdrImage;
+
 const float PI = 3.14159265359;
 
 // --- [SSR 屏幕空间反射] ---
@@ -241,6 +243,8 @@ void main() {
     vec3 emissive = albedo * posE.a * 5.0;
     
     vec3 result = ambient + Lo + emissive + indirectGI;
+    // --- Bloom: 导出 HDR 用于 Bloom 管线 ---
+    imageStore(hdrImage, ivec2(gl_FragCoord.xy), vec4(result, 1.0));
 
     // 曝光与 Gamma 校正
     result = vec3(1.0) - exp(-result * 1.5); // 简单的 Tone Mapping

@@ -215,6 +215,23 @@ private:
 	VkDescriptorSet m_gtaoDescriptorSet;
 	AllocatedImage m_aoImage;
 
+	// bloom
+	// HDR scene image (exported by main.frag before tone mapping)
+	AllocatedImage m_bloomHdrImage;
+	VkDescriptorSetLayout m_hdrDescriptorSetLayout;
+	VkDescriptorSet m_bloomHdrSet;
+
+	// Bloom pipeline
+	VkPipelineLayout m_bloomPipelineLayout;
+	VkPipelineLayout m_bloomCompPipelineLayout;
+	VkPipeline m_bloomExtractPipeline;
+	VkPipeline m_bloomDownsamplePipeline;
+	VkPipeline m_bloomUpsamplePipeline;
+	VkPipeline m_bloomCompositePipeline;
+	VkDescriptorSetLayout m_bloomDescriptorSetLayout;
+	VkDescriptorSetLayout m_bloomCompDescriptorSetLayout;
+	AllocatedImage m_bloomMipChain[4]; // full, 1/2, 1/4, 1/8
+
 public:
 
 	// ----------------------vulkan rendering functions-------------------
@@ -232,7 +249,10 @@ public:
 	void initGridPipeline();
 	void initShadowPipeline();
 	void initGTAOPipeline();
-	void initDescriptors();
+	void initBloomPipeline();
+	void initLumenGbufferPipeline();
+	void initLumenLightingPipeline();
+
 	void initDescriptorPool();
 
 
@@ -272,16 +292,21 @@ public:
 	void createImageViews();
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
 
+	void initSkyboxMesh();
+	void initDescriptors();
 	void createDepthBuffer();
 	void createFramebuffers();
 	void createSceneBuffers();
-	void updateSkyboxDescriptor();
-
-	void initAOResources();
-
-
-	void initSkyboxMesh();
 	void initShadowResources();
+	void initDefaultResources();
+	void initGbuffer();
+	void initAOResources();
+	void initBloomResources();
+
+	void updateSkyboxDescriptor();
+	void updateLumenDescriptorSet();
+	void updateForwardIBLDescriptorSet();
+	void updateBloomDescriptorSets();
 
 	VkFormat findDepthFormat();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
@@ -290,7 +315,6 @@ public:
 	void drawFrame();
 	void drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
 	void drawLumenFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
-
 
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
@@ -307,14 +331,6 @@ public:
 		void* pUserData
 	);
 
-	// Lumen G-Buffer
-	void initGbuffer();
-
-	void updateLumenDescriptorSet();
-
-	void initLumenLightingPipeline();
-
-	void initLumenGbufferPipeline();
 
 
 
@@ -335,10 +351,6 @@ public:
 	VkImage loadBRDFLUT(VkImageView* outView);
 
 	void loadPrefilteredMap();
-
-	void updateForwardIBLDescriptorSet();
-
-	void initDefaultResources();
 
 	void initSceneData();
 
@@ -366,6 +378,7 @@ public:
 	void executeShadowPass(VkCommandBuffer cmd);
 	void executeForwardPass(VkCommandBuffer cmd);
 	void executeGTAOPass(VkCommandBuffer cmd);
+	void executeBloomPass(VkCommandBuffer cmd);
 
 
 	RenderObject* pickObject(float mouseX, float mouseY);

@@ -1,0 +1,30 @@
+#version 450
+#extension GL_KHR_vulkan_glsl : enable
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform image2D srcImage;
+layout(set = 0, binding = 1, rgba16f) uniform image2D dstImage;
+
+layout(push_constant) uniform BloomParams {
+    float threshold;
+    float intensity;
+    float _pad0;
+    float _pad1;
+} params;
+
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dstImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec3 color = imageLoad(srcImage, coord).rgb;
+    float luma = luminance(color);
+    float amount = clamp(luma - params.threshold, 0.0, 1.0);
+
+    imageStore(dstImage, coord, vec4(color * amount, 0.0));
+}

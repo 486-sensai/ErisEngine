@@ -4,9 +4,13 @@ glslangValidator.exe -V skybox.vert -o sky_vert.spv
 glslangValidator.exe -V skybox.frag -o sky_frag.spv
 glslangValidator.exe -V grid.vert -o grid_vert.spv
 glslangValidator.exe -V grid.frag -o grid_frag.spv
-glslangValidator.exe -V shadow.vert -o shadow_vert.spv
+glslangValidator.exe -V shadows/shadow.vert -o shadows/shadow_vert.spv
 
-glslangValidator.exe -V gtao.comp -o gtao.spv
+glslangValidator.exe -V compute_shaders/gtao.comp -o compute_shaders/gtao.spv
+glslangValidator.exe -V compute_shaders/bloom_extract.comp -o compute_shaders/bloom_extract.spv
+glslangValidator.exe -V compute_shaders/bloom_downsample.comp -o compute_shaders/bloom_downsample.spv
+glslangValidator.exe -V compute_shaders/bloom_upsample.comp -o compute_shaders/bloom_upsample.spv
+glslangValidator.exe -V compute_shaders/bloom_composite.comp -o compute_shaders/bloom_composite.spv
 
 glslangValidator.exe -V Lumen/main.vert -o Lumen/main_vert.spv
 glslangValidator.exe -V Lumen/main.frag -o Lumen/main_frag.spv
