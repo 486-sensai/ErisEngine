@@ -123,7 +123,7 @@ void ErisEditor::render_editor(ErisEngine* engine)
     show_details(engine);     // 显示右侧属性面板
     show_content_browser(engine);   // 显示底部资源浏览器（如果有）
     show_environment_settings(engine);
-
+    show_visual_effects(engine);
 
     ImGui::End(); // 结束 DockSpace
     ImGui::Render();
@@ -186,7 +186,9 @@ void ErisEditor::show_main_dockspace(ErisEngine* engine)
         ImGui::DockBuilderDockWindow("Outliner", dock_id_left);
         ImGui::DockBuilderDockWindow("Details", dock_id_right);
         ImGui::DockBuilderDockWindow("Environment", dock_id_right);
+        ImGui::DockBuilderDockWindow("Visual Effects", dock_id_right);
         ImGui::DockBuilderDockWindow("Content Browser", dock_id_bottom);
+
 
         // 4. 完成构建
         ImGui::DockBuilderFinish(dockspace_id);
@@ -557,6 +559,22 @@ void ErisEditor::show_environment_settings(ErisEngine* engine)
             }
             ImGui::PopID();
         }
+    }
+
+    ImGui::End();
+}
+
+void ErisEditor::show_visual_effects(ErisEngine* engine)
+{
+    ImGui::Begin("Visual Effects");
+
+
+    if (ImGui::CollapsingHeader("Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
+        bool enabled = engine->m_bloomMode == ErisEngine::BloomMode::On;
+        ImGui::Checkbox("Enable Bloom", &enabled);
+        engine->m_bloomMode = enabled ? ErisEngine::BloomMode::On : ErisEngine::BloomMode::Off;
+        ImGui::SliderFloat("Threshold", &engine->m_bloomThreshold, 0.0f, 1000.0f, "%.2f");
+        ImGui::SliderFloat("Intensity", &engine->m_bloomIntensity, 0.0f, 5.0f, "%.2f");
     }
 
     ImGui::End();

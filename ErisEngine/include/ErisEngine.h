@@ -83,9 +83,13 @@ public:
 		Forward,
 		Lumen
 	};
+	enum class BloomMode {
+		Off,
+		On
+	};
 	ErisEngine()
 		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr), m_selectedObject(nullptr),
-		m_framebufferResized(false), m_isMousePressed(false)
+		m_framebufferResized(false), m_isMousePressed(false), m_bloomThreshold(0.5f), m_bloomIntensity(1.0f)
 	{}
 
 	int Eris_init();
@@ -104,7 +108,12 @@ private:
 	VkRect2D m_scissor;
 	double m_lastX, m_lastY;
 
-	RenderPath m_activePath = RenderPath::Lumen;
+	// bloom parameters
+	float m_bloomThreshold;
+	float m_bloomIntensity;
+
+	RenderPath	m_activePath = RenderPath::Lumen;
+	BloomMode	m_bloomMode = BloomMode::On;
 
 	// vulkan core
 	VkInstance m_instance;
@@ -215,6 +224,29 @@ private:
 	VkDescriptorSet m_gtaoDescriptorSet;
 	AllocatedImage m_aoImage;
 
+	// bloom
+	VkPipelineLayout m_bloomPipelineLayout;        // sampler + storage（down/upsample）
+	VkPipelineLayout m_bloomCompPipelineLayout;    // storage + storage（其余 shader）
+	VkDescriptorSetLayout m_bloomCompSetLayout;
+	VkDescriptorSetLayout m_bloomDescriptorSetLayout;
+	AllocatedImage m_bloomMipChain[4];             // 1/2, 1/4, 1/8, 1/8
+	VkDescriptorSet m_bloomDownsampleSets[3];
+	VkDescriptorSet m_bloomUpsampleSets[3];
+
+	AllocatedImage m_bloomLdrImage;
+	VkDescriptorSet m_bloomLdrTextureSet;  // ImGui 显示用
+
+	// bloom pipelines（所有 shader 共 6 个）
+	VkPipeline m_bloomExtractPipeline;             // hdrImage → mip[0]
+	VkPipeline m_bloomDownsamplePipeline;          // mip[i] → mip[i+1]
+	VkPipeline m_bloomUpsamplePipeline;            // mip[i+1] → mip[i]（累加）
+	VkPipeline m_bloomCompositePipeline;           // hdrImage + bloom → hdrImage
+	VkPipeline m_bloomFinalizePipeline;            // hdrImage → tone-map → viewportImage
+
+	VkDescriptorSet m_bloomExtractSet;
+	VkDescriptorSet m_bloomCompositeSet;
+	VkDescriptorSet m_bloomFinalizeSet;
+
 public:
 
 	// ----------------------vulkan rendering functions-------------------
@@ -232,7 +264,10 @@ public:
 	void initGridPipeline();
 	void initShadowPipeline();
 	void initGTAOPipeline();
-	void initDescriptors();
+	void initBloomPipeline();
+	void initLumenGbufferPipeline();
+	void initLumenLightingPipeline();
+
 	void initDescriptorPool();
 
 
@@ -272,16 +307,21 @@ public:
 	void createImageViews();
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
 
+	void initSkyboxMesh();
+	void initDescriptors();
 	void createDepthBuffer();
 	void createFramebuffers();
 	void createSceneBuffers();
-	void updateSkyboxDescriptor();
-
-	void initAOResources();
-
-
-	void initSkyboxMesh();
 	void initShadowResources();
+	void initDefaultResources();
+	void initGbuffer();
+	void initAOResources();
+	void initBloomResources();
+
+	void updateSkyboxDescriptor();
+	void updateLumenDescriptorSet();
+	void updateForwardIBLDescriptorSet();
+	void updateBloomDescriptorSets();
 
 	VkFormat findDepthFormat();
 	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
@@ -290,7 +330,6 @@ public:
 	void drawFrame();
 	void drawForwardFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
 	void drawLumenFrame(VkCommandBuffer cmd, FrameData& frame, uint32_t imageIndex);
-
 
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
@@ -307,14 +346,6 @@ public:
 		void* pUserData
 	);
 
-	// Lumen G-Buffer
-	void initGbuffer();
-
-	void updateLumenDescriptorSet();
-
-	void initLumenLightingPipeline();
-
-	void initLumenGbufferPipeline();
 
 
 
@@ -335,10 +366,6 @@ public:
 	VkImage loadBRDFLUT(VkImageView* outView);
 
 	void loadPrefilteredMap();
-
-	void updateForwardIBLDescriptorSet();
-
-	void initDefaultResources();
 
 	void initSceneData();
 
@@ -366,6 +393,7 @@ public:
 	void executeShadowPass(VkCommandBuffer cmd);
 	void executeForwardPass(VkCommandBuffer cmd);
 	void executeGTAOPass(VkCommandBuffer cmd);
+	void executeBloomPass(VkCommandBuffer cmd);
 
 
 	RenderObject* pickObject(float mouseX, float mouseY);

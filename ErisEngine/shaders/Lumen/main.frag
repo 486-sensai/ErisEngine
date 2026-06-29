@@ -37,6 +37,8 @@ layout(set = 1, binding = 5) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 6) uniform samplerCube prefilteredMap;
 layout(set = 1, binding = 7) uniform sampler2D aoTexture;
 
+layout(set = 2, binding = 0, rgba16f) uniform image2D hdrImage;
+
 const float PI = 3.14159265359;
 
 // --- [SSR 屏幕空间反射] ---
@@ -165,9 +167,16 @@ void main() {
     vec3 R = reflect(-V, N); // 反射向量
 
     vec3 albedo = albR.rgb;
-    float roughness = max(albR.a, 0.05);
-    float metallic = normM.a;
 
+    float originRoughness = max(albR.a, 0.05);
+    float metallic = normM.a;
+    float roughness = originRoughness;
+    {
+        vec3 dNdx = dFdx(N);
+        vec3 dNdy = dFdy(N);
+        float variance = dot(dNdx, dNdx) + dot(dNdy, dNdy);
+        roughness = max(originRoughness,  sqrt(variance));
+    }
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
 
@@ -240,9 +249,10 @@ void main() {
     vec3 ambient = (kD_ibl * diffuseIBL * aoFactor) + finalSpecular;
     vec3 emissive = albedo * posE.a * 5.0;
     
-    vec3 result = ambient + Lo + emissive + indirectGI;
-
+    //vec3 result = ambient + Lo + emissive + indirectGI;
+    vec3 result = Lo + emissive + indirectGI + ambient;
     // 曝光与 Gamma 校正
-    result = vec3(1.0) - exp(-result * 1.5); // 简单的 Tone Mapping
-    outFragColor = vec4(pow(result, vec3(1.0/2.2)), 1.0);
+    // result = vec3(1.0) - exp(-result * 1.5); // 简单的 Tone Mapping
+    // outFragColor = vec4(pow(result, vec3(1.0/2.2)), 1.0);
+    outFragColor = vec4(result, 1.0);
 }
