@@ -71,5 +71,4 @@ void main() {
 
     outColor = vec4(finalColor, fading);
     
-    // 注：删除了底部的绿色测试代码，让正常的颜色输出生效
 }

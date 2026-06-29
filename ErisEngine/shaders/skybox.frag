@@ -7,5 +7,6 @@ layout (location = 0) out vec4 outColor;
 layout (set = 1, binding = 0) uniform samplerCube skyboxSampler;
 
 void main() {
-	outColor = texture(skyboxSampler, fragViewDir);
+    vec3 skyColor = texture(skyboxSampler, fragViewDir).rgb;
+	outColor = vec4(pow(skyColor, vec3(2.2)), 1.0);
 }

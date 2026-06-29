@@ -568,8 +568,12 @@ void ErisEditor::show_visual_effects(ErisEngine* engine)
 {
     ImGui::Begin("Visual Effects");
 
+
     if (ImGui::CollapsingHeader("Bloom", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderFloat("Threshold", &engine->m_bloomThreshold, 0.0f, 1.0f, "%.2f");
+        bool enabled = engine->m_bloomMode == ErisEngine::BloomMode::On;
+        ImGui::Checkbox("Enable Bloom", &enabled);
+        engine->m_bloomMode = enabled ? ErisEngine::BloomMode::On : ErisEngine::BloomMode::Off;
+        ImGui::SliderFloat("Threshold", &engine->m_bloomThreshold, 0.0f, 1000.0f, "%.2f");
         ImGui::SliderFloat("Intensity", &engine->m_bloomIntensity, 0.0f, 5.0f, "%.2f");
     }
 

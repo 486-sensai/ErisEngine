@@ -83,6 +83,10 @@ public:
 		Forward,
 		Lumen
 	};
+	enum class BloomMode {
+		Off,
+		On
+	};
 	ErisEngine()
 		:m_isInitialized(false), m_frameNumber(0), m_window(nullptr), m_selectedObject(nullptr),
 		m_framebufferResized(false), m_isMousePressed(false), m_bloomThreshold(0.5f), m_bloomIntensity(1.0f)
@@ -108,7 +112,8 @@ private:
 	float m_bloomThreshold;
 	float m_bloomIntensity;
 
-	RenderPath m_activePath = RenderPath::Lumen;
+	RenderPath	m_activePath = RenderPath::Lumen;
+	BloomMode	m_bloomMode = BloomMode::On;
 
 	// vulkan core
 	VkInstance m_instance;
@@ -220,19 +225,27 @@ private:
 	AllocatedImage m_aoImage;
 
 	// bloom
-	VkPipelineLayout m_bloomPipelineLayout;
-	VkPipelineLayout m_bloomCompPipelineLayout;
+	VkPipelineLayout m_bloomPipelineLayout;        // sampler + storage（down/upsample）
+	VkPipelineLayout m_bloomCompPipelineLayout;    // storage + storage（其余 shader）
 	VkDescriptorSetLayout m_bloomCompSetLayout;
 	VkDescriptorSetLayout m_bloomDescriptorSetLayout;
-	VkPipeline m_bloomExtractPipeline;
-	VkPipeline m_bloomDownsamplePipeline;
-	VkPipeline m_bloomUpsamplePipeline;
-	VkPipeline m_bloomCompositePipeline;
-	AllocatedImage m_bloomMipChain[4]; // full, 1/2, 1/4, 1/8
+	AllocatedImage m_bloomMipChain[4];             // 1/2, 1/4, 1/8, 1/8
 	VkDescriptorSet m_bloomDownsampleSets[3];
 	VkDescriptorSet m_bloomUpsampleSets[3];
+
+	AllocatedImage m_bloomLdrImage;
+	VkDescriptorSet m_bloomLdrTextureSet;  // ImGui 显示用
+
+	// bloom pipelines（所有 shader 共 6 个）
+	VkPipeline m_bloomExtractPipeline;             // hdrImage → mip[0]
+	VkPipeline m_bloomDownsamplePipeline;          // mip[i] → mip[i+1]
+	VkPipeline m_bloomUpsamplePipeline;            // mip[i+1] → mip[i]（累加）
+	VkPipeline m_bloomCompositePipeline;           // hdrImage + bloom → hdrImage
+	VkPipeline m_bloomFinalizePipeline;            // hdrImage → tone-map → viewportImage
+
 	VkDescriptorSet m_bloomExtractSet;
 	VkDescriptorSet m_bloomCompositeSet;
+	VkDescriptorSet m_bloomFinalizeSet;
 
 public:
 

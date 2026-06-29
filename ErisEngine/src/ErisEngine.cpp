@@ -954,8 +954,10 @@ void ErisEngine::initAOResources()
 
 void ErisEngine::initBloomResources()
 {
+
 	VmaAllocationCreateInfo allocInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 
+	// mip chain ×4
 	for (int i = 0; i < 4; i++) {
 		int d = 1 << i;
 		VkExtent3D mipExt{ std::max(1u, m_swapchainExtent.width / d), std::max(1u, m_swapchainExtent.height / d), 1 };
@@ -973,7 +975,8 @@ void ErisEngine::initBloomResources()
 		m_bloomMipChain[i].imageView = createImageView(
 			m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 	}
-	// 初始过渡：HDR 用 GENERAL（storage 读写，不转回 SHADER_READ_ONLY），mip 用 SHADER_READ_ONLY
+
+	// 初始 layout：hdrImage → GENERAL，mip chain → SHADER_READ_ONLY
 	immediateSubmit([&](VkCommandBuffer cmd) {
 		for (int i = 0; i < 4; i++) {
 			transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -1163,7 +1166,7 @@ void ErisEngine::initSkyboxPipeline()
 
 	std::array<VkDescriptorSetLayout, 2> skyboxLayouts = { m_globalSetLayout, m_skyboxDescriptorSetLayout };
 	VkPipelineLayoutCreateInfo skyLayoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	skyLayoutInfo.setLayoutCount = 2;
+	skyLayoutInfo.setLayoutCount = static_cast<uint32_t>(skyboxLayouts.size());
 	skyLayoutInfo.pSetLayouts = skyboxLayouts.data();
 	// 天空盒通常不需要 PushConstants，或者只需要一个缩放系数
 	skyLayoutInfo.pushConstantRangeCount = 0;
@@ -1241,7 +1244,7 @@ void ErisEngine::initGridPipeline()
 
 	std::array<VkDescriptorSetLayout, 1>layouts = { m_globalSetLayout };
 	VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	layoutInfo.setLayoutCount = 1;
+	layoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
 	layoutInfo.pSetLayouts = layouts.data();
 	if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_gridPipelineLayout) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create grid pipeline layout!");
@@ -1504,8 +1507,7 @@ void ErisEngine::initBloomPipeline()
 	pcRange.offset = 0;
 	pcRange.size = 16; // vec4
 
-	// ── Layout 1: sampler + storage ──
-	// 用于 downsample / upsample
+	// Layout 1: sampler + storage（downsample / upsample）
 	std::array<VkDescriptorSetLayoutBinding, 2> samplerBinds{};
 	samplerBinds[0].binding = 0;
 	samplerBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1517,7 +1519,7 @@ void ErisEngine::initBloomPipeline()
 	samplerBinds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	VkDescriptorSetLayoutCreateInfo samplerLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	samplerLayout.bindingCount = static_cast<uint32_t>(samplerBinds.size());
+	samplerLayout.bindingCount = (uint32_t)samplerBinds.size();
 	samplerLayout.pBindings = samplerBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &samplerLayout, nullptr, &m_bloomDescriptorSetLayout);
 
@@ -1528,8 +1530,7 @@ void ErisEngine::initBloomPipeline()
 	samplerPl.pPushConstantRanges = &pcRange;
 	vkCreatePipelineLayout(m_device, &samplerPl, nullptr, &m_bloomPipelineLayout);
 
-	// ── Layout 2: storage + storage ──
-	// 用于 extract / composite（都读写 storage image）
+	// Layout 2: storage + storage（prepare / extract / composite / finalize）
 	std::array<VkDescriptorSetLayoutBinding, 2> storageBinds{};
 	storageBinds[0].binding = 0;
 	storageBinds[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -1541,7 +1542,7 @@ void ErisEngine::initBloomPipeline()
 	storageBinds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	VkDescriptorSetLayoutCreateInfo storageLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	storageLayout.bindingCount = static_cast<uint32_t>(storageBinds.size());
+	storageLayout.bindingCount = (uint32_t)storageBinds.size();
 	storageLayout.pBindings = storageBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &storageLayout, nullptr, &m_bloomCompSetLayout);
 
@@ -1552,7 +1553,7 @@ void ErisEngine::initBloomPipeline()
 	storagePl.pPushConstantRanges = &pcRange;
 	vkCreatePipelineLayout(m_device, &storagePl, nullptr, &m_bloomCompPipelineLayout);
 
-	// ── 创建 4 个 pipeline ──
+	// 创建 pipeline
 	auto createPipeline = [&](const char* path, VkPipelineLayout layout) -> VkPipeline {
 		VkShaderModule mod;
 		if (!loadShaderModule(path, &mod))
@@ -1564,19 +1565,21 @@ void ErisEngine::initBloomPipeline()
 		return p;
 		};
 
-	m_bloomExtractPipeline		= createPipeline("shaders/compute_shaders/bloom_extract.spv", m_bloomCompPipelineLayout);
-	m_bloomDownsamplePipeline	= createPipeline("shaders/compute_shaders/bloom_downsample.spv", m_bloomPipelineLayout);
-	m_bloomUpsamplePipeline		= createPipeline("shaders/compute_shaders/bloom_upsample.spv", m_bloomPipelineLayout);
-	m_bloomCompositePipeline	= createPipeline("shaders/compute_shaders/bloom_composite.spv", m_bloomCompPipelineLayout);
+	m_bloomExtractPipeline = createPipeline("shaders/compute_shaders/HDR/bloom_extract.spv", m_bloomCompPipelineLayout);
+	m_bloomDownsamplePipeline = createPipeline("shaders/compute_shaders/HDR/bloom_downsample.spv", m_bloomPipelineLayout);
+	m_bloomUpsamplePipeline = createPipeline("shaders/compute_shaders/HDR/bloom_upsample.spv", m_bloomPipelineLayout);
+	m_bloomCompositePipeline = createPipeline("shaders/compute_shaders/HDR/bloom_composite.spv", m_bloomCompPipelineLayout);
+	m_bloomFinalizePipeline = createPipeline("shaders/compute_shaders/HDR/bloom_finalize.spv", m_bloomCompPipelineLayout);
 
 	m_mainDeletionQueue.push_function([=]() {
 		vkDestroyPipeline(m_device, m_bloomExtractPipeline, nullptr);
 		vkDestroyPipeline(m_device, m_bloomDownsamplePipeline, nullptr);
 		vkDestroyPipeline(m_device, m_bloomUpsamplePipeline, nullptr);
 		vkDestroyPipeline(m_device, m_bloomCompositePipeline, nullptr);
+		vkDestroyPipeline(m_device, m_bloomFinalizePipeline, nullptr);
 		vkDestroyPipelineLayout(m_device, m_bloomPipelineLayout, nullptr);
-		vkDestroyPipelineLayout(m_device, m_bloomCompPipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_bloomDescriptorSetLayout, nullptr);
+		vkDestroyPipelineLayout(m_device, m_bloomCompPipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_bloomCompSetLayout, nullptr);
 		});
 }
@@ -1646,6 +1649,15 @@ void ErisEngine::cleanSwapchain()
 		m_viewportImage.image = VK_NULL_HANDLE;
 	}
 
+	// 释放 LDR image
+	if (m_bloomLdrImage.imageView != VK_NULL_HANDLE) {
+		vkDestroyImageView(m_device, m_bloomLdrImage.imageView, nullptr);
+		m_bloomLdrImage.imageView = VK_NULL_HANDLE;
+	}
+	if (m_bloomLdrImage.image != VK_NULL_HANDLE) {
+		vmaDestroyImage(m_allocator, m_bloomLdrImage.image, m_bloomLdrImage.allocation);
+		m_bloomLdrImage.image = VK_NULL_HANDLE;
+	}
 
 	// 显式销毁深度资源
 	if (m_depthImage.imageView != VK_NULL_HANDLE) {
@@ -1937,14 +1949,14 @@ void ErisEngine::initViewportPass()
 {
 	// 1. 颜色附件 (最终合成后的画面)
 	VkAttachmentDescription colorAttachment{};
-	colorAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	colorAttachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
 	colorAttachment.samples = msaaSamples;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
 	// 2. 深度附件
 	VkAttachmentDescription depthAttachment{};
@@ -1990,7 +2002,7 @@ void ErisEngine::initViewportForwardPass()
 {
 	// 1. 颜色附件 (最终合成后的画面)
 	VkAttachmentDescription colorAttachment{};
-	colorAttachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	colorAttachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
 	colorAttachment.samples = msaaSamples;
 	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -2619,7 +2631,7 @@ void ErisEngine::initDescriptors() {
 	lumenLayoutInfo.pBindings = lumenBinds.data();
 	vkCreateDescriptorSetLayout(m_device, &lumenLayoutInfo, nullptr, &m_lumenDescriptorLayout);
 
-
+	
 
 	// 注册销毁 (注意顺序：先删 Pool 再删 Layout)
 	m_mainDeletionQueue.push_function([=]() {
@@ -2638,7 +2650,7 @@ void ErisEngine::initDescriptorPool()
 	std::vector<VkDescriptorPoolSize>sizes = {
 		{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,100},				// 支持 100 个全局数据块
 		{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,500},		// 支持 500 张材质贴图
-		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,10}
+		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,15}
 	};
 
 	VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -2947,14 +2959,15 @@ void ErisEngine::updateForwardIBLDescriptorSet()
 
 void ErisEngine::updateBloomDescriptorSets()
 {
-	// ── Bloom dispatch sets ──
+
+	// Downsample / Upsample sets（mip chain，不变）
 	for (int i = 0; i < 3; i++) {
 		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 		alloc.descriptorPool = m_descriptorPool;
 		alloc.descriptorSetCount = 1;
 		alloc.pSetLayouts = &m_bloomDescriptorSetLayout;
 
-		// downsample: mip[i](sampler) → mip[i+1](storage)
+		// downsample
 		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomDownsampleSets[i]);
 		VkDescriptorImageInfo sSrc{}, sDst{};
 		sSrc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2973,7 +2986,7 @@ void ErisEngine::updateBloomDescriptorSets()
 		sw[1].pImageInfo = &sDst;
 		vkUpdateDescriptorSets(m_device, 2, sw, 0, nullptr);
 
-		// upsample: mip[i+1](sampler) → mip[i](storage, 累加)
+		// upsample
 		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomUpsampleSets[i]);
 		VkDescriptorImageInfo uSrc{}, uDst{};
 		uSrc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2985,7 +2998,8 @@ void ErisEngine::updateBloomDescriptorSets()
 		sw[1].dstSet = m_bloomUpsampleSets[i]; sw[1].pImageInfo = &uDst;
 		vkUpdateDescriptorSets(m_device, 2, sw, 0, nullptr);
 	}
-	// extract: HDR(storage) → bloom_full(storage)
+
+	// ── Extract set: viewportImage(HDR) → mip[0] ──
 	{
 		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 		alloc.descriptorPool = m_descriptorPool;
@@ -3008,7 +3022,8 @@ void ErisEngine::updateBloomDescriptorSets()
 		ew[1].pImageInfo = &eDst;
 		vkUpdateDescriptorSets(m_device, 2, ew, 0, nullptr);
 	}
-	// composite: HDR(storage) + bloom_full(storage) → HDR(storage)
+
+	// ── Composite set: viewportImage + mip[0] → viewportImage ──
 	{
 		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 		alloc.descriptorPool = m_descriptorPool;
@@ -3030,6 +3045,30 @@ void ErisEngine::updateBloomDescriptorSets()
 		cw[1].descriptorCount = 1; cw[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		cw[1].pImageInfo = &cBlo;
 		vkUpdateDescriptorSets(m_device, 2, cw, 0, nullptr);
+	}
+
+	// ── Finalize set: viewportImage(HDR) → LDR image ──
+	{
+		VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		alloc.descriptorPool = m_descriptorPool;
+		alloc.descriptorSetCount = 1;
+		alloc.pSetLayouts = &m_bloomCompSetLayout;
+		vkAllocateDescriptorSets(m_device, &alloc, &m_bloomFinalizeSet);
+		VkDescriptorImageInfo fSrc{}, fDst{};
+		fSrc.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		fSrc.imageView = m_viewportImage.imageView;
+		fDst.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		fDst.imageView = m_bloomLdrImage.imageView;
+		VkWriteDescriptorSet fw[2] = {};
+		fw[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		fw[0].dstSet = m_bloomFinalizeSet; fw[0].dstBinding = 0;
+		fw[0].descriptorCount = 1; fw[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		fw[0].pImageInfo = &fSrc;
+		fw[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		fw[1].dstSet = m_bloomFinalizeSet; fw[1].dstBinding = 1;
+		fw[1].descriptorCount = 1; fw[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		fw[1].pImageInfo = &fDst;
+		vkUpdateDescriptorSets(m_device, 2, fw, 0, nullptr);
 	}
 
 }
@@ -3280,17 +3319,17 @@ void ErisEngine::executeForwardPass(VkCommandBuffer cmd) {
 	// --- 4. 执行绘制流程 ---
 	vkCmdBeginRenderPass(cmd, &sceneRpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-	// A. 画模型 (使用 Forward 专用管线)
+		// A. 画模型 (使用 Forward 专用管线)
 
-	// 绑定 IBL 描述符集 (Set 2)
+		// 绑定 IBL 描述符集 (Set 2)
 
-	drawMainGeometry(cmd, m_pipeline, m_pipelineLayout);
+		drawMainGeometry(cmd, m_pipeline, m_pipelineLayout);
 
-	// B. 画天空盒
-	drawSkybox(cmd);
+		// B. 画天空盒
+		drawSkybox(cmd);
 
-	// C. 画网格
-	drawGrid(cmd);
+		// C. 画网格
+		drawGrid(cmd);
 
 	vkCmdEndRenderPass(cmd);
 
@@ -3353,6 +3392,35 @@ void ErisEngine::executeGTAOPass(VkCommandBuffer cmd)
 void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 {
 	uint32_t w = m_swapchainExtent.width, h = m_swapchainExtent.height;
+
+	if (m_bloomMode == BloomMode::Off) {
+		// Bloom off：仅 finalize，更新 LDR image 防止画面卡死
+		VkMemoryBarrier offBarrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		offBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		offBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &offBarrier, 0, nullptr, 0, nullptr);
+
+		transitionImageLayout(cmd, m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+		{
+			float exposure = 1.5f;
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomFinalizePipeline);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+				m_bloomCompPipelineLayout, 0, 1, &m_bloomFinalizeSet, 0, nullptr);
+			vkCmdPushConstants(cmd, m_bloomCompPipelineLayout,
+				VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &exposure);
+			vkCmdDispatch(cmd, (w + 15) / 16, (h + 15) / 16, 1);
+		}
+		transitionImageLayout(cmd, m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
+
+		offBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &offBarrier, 0, nullptr, 0, nullptr);
+		return;
+	}
 	struct { int x, y; } mipSize[4] = {
 		{(int)w, (int)h},
 		{std::max(1, (int)(w / 2)), std::max(1, (int)(h / 2))},
@@ -3360,22 +3428,26 @@ void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 		{std::max(1, (int)(w / 8)), std::max(1, (int)(h / 8))}
 	};
 
-	// 1. 转 viewportImage → GENERAL 以供 compute 读写
-	transitionImageLayout(cmd, m_viewportImage.image, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
-
 	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-	// 2. Extract: viewportImage → mip[0]
+	// 1. FRAGMENT → COMPUTE barrier（等 render pass 写完）
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+	// 2. Extract: viewportImage(HDR) → mip[0]
 	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 	{
 		float threshold = m_bloomThreshold;
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomExtractPipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomExtractSet, 0, nullptr);
-		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &threshold);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			m_bloomCompPipelineLayout, 0, 1, &m_bloomExtractSet, 0, nullptr);
+		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &threshold);
 		vkCmdDispatch(cmd, (mipSize[0].x + 15) / 16, (mipSize[0].y + 15) / 16, 1);
 	}
 	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -3385,9 +3457,11 @@ void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 	for (int i = 0; i < 3; i++) {
 		transitionImageLayout(cmd, m_bloomMipChain[i + 1].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
-		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomDownsamplePipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomPipelineLayout, 0, 1, &m_bloomDownsampleSets[i], 0, nullptr);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			m_bloomPipelineLayout, 0, 1, &m_bloomDownsampleSets[i], 0, nullptr);
 		vkCmdDispatch(cmd, (mipSize[i + 1].x + 15) / 16, (mipSize[i + 1].y + 15) / 16, 1);
 		transitionImageLayout(cmd, m_bloomMipChain[i + 1].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
@@ -3397,35 +3471,54 @@ void ErisEngine::executeBloomPass(VkCommandBuffer cmd)
 	for (int i = 2; i >= 0; i--) {
 		transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
-		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomUpsamplePipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomPipelineLayout, 0, 1, &m_bloomUpsampleSets[i], 0, nullptr);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			m_bloomPipelineLayout, 0, 1, &m_bloomUpsampleSets[i], 0, nullptr);
 		vkCmdDispatch(cmd, (mipSize[i].x + 15) / 16, (mipSize[i].y + 15) / 16, 1);
 		transitionImageLayout(cmd, m_bloomMipChain[i].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
 	}
 
-	// 5. Composite: bloom 叠加回 viewportImage
+	// 5. Composite: viewportImage + bloom → viewportImage
 	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 	{
-		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 		float intensity = m_bloomIntensity;
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompositePipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomCompPipelineLayout, 0, 1, &m_bloomCompositeSet, 0, nullptr);
-		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &intensity);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			m_bloomCompPipelineLayout, 0, 1, &m_bloomCompositeSet, 0, nullptr);
+		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &intensity);
 		vkCmdDispatch(cmd, (w + 15) / 16, (h + 15) / 16, 1);
 	}
 	transitionImageLayout(cmd, m_bloomMipChain[0].image, VK_FORMAT_R16G16B16A16_SFLOAT,
 		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
 
-	// 6. viewportImage 转回 SHADER_READ_ONLY
-	transitionImageLayout(cmd, m_viewportImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+	// 6. Finalize: viewportImage(HDR) → tone-map → gamma → LDR image
+	transitionImageLayout(cmd, m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, 1, 1, 0);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+	{
+		float exposure = 1.5f;
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_bloomFinalizePipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			m_bloomCompPipelineLayout, 0, 1, &m_bloomFinalizeSet, 0, nullptr);
+		vkCmdPushConstants(cmd, m_bloomCompPipelineLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float), &exposure);
+		vkCmdDispatch(cmd, (w + 15) / 16, (h + 15) / 16, 1);
+	}
+	transitionImageLayout(cmd, m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM,
 		VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
 
-	// 7. Barrier: compute → fragment
+	// 7. COMPUTE → FRAGMENT barrier（给 ImGui 用）
 	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 
@@ -3675,7 +3768,7 @@ void ErisEngine::initViewportResources()
 {
 	// 1. 创建离屏图像 (m_viewportImage)
 	// VkFormat colorFormat = m_swapchainImageFormat;
-	VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+	VkFormat colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 	VkExtent3D extent = { m_swapchainExtent.width, m_swapchainExtent.height, 1 };
 
 	VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -3691,10 +3784,18 @@ void ErisEngine::initViewportResources()
 	VmaAllocationCreateInfo allocationInfo{ VMA_MEMORY_USAGE_GPU_ONLY };
 	if (vmaCreateImage(m_allocator, &imgInfo, &allocationInfo,
 		&m_viewportImage.image, &m_viewportImage.allocation, nullptr) != VK_SUCCESS) {
-		throw std::runtime_error("failed to create viewport image!");
-	};
-
+		throw std::runtime_error("failed to create HDR viewport image!");
+	}
 	m_viewportImage.imageView = createImageView(m_viewportImage.image, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+	
+    VkImageCreateInfo ldrInfo = imgInfo;
+    ldrInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ldrInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	if (vmaCreateImage(m_allocator, &ldrInfo, &allocationInfo,
+		&m_bloomLdrImage.image, &m_bloomLdrImage.allocation, nullptr) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create LDR viewport image!");
+	}
+    m_bloomLdrImage.imageView = createImageView(m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 
 	// 2. 创建视口 Framebuffer
 	// 注意：这里必须包含 颜色附件(视口图) 和 深度附件(深度图)
@@ -3714,12 +3815,14 @@ void ErisEngine::initViewportResources()
 	}
 
 	immediateSubmit([&](VkCommandBuffer cmd) {
-		transitionImageLayout(cmd, m_viewportImage.image, m_swapchainImageFormat,
+		transitionImageLayout(cmd, m_viewportImage.image, VK_FORMAT_R16G16B16A16_SFLOAT,
 			VK_IMAGE_LAYOUT_UNDEFINED,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 		transitionImageLayout(cmd, m_depthImage.image, m_depthFormat,
 			VK_IMAGE_LAYOUT_UNDEFINED,
 			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+		transitionImageLayout(cmd, m_bloomLdrImage.image, VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1, 0);
 		});
 
 	if (m_viewportTextureSet != VK_NULL_HANDLE) {
@@ -3728,7 +3831,9 @@ void ErisEngine::initViewportResources()
 
 	// 3. 将离屏贴图交给 ImGui 注册
 	// 注意：如果是重构交换链，ImGui 会处理旧的贴图 ID，或者你需要手动 RemoveTexture
-	m_viewportTextureSet = ImGui_ImplVulkan_AddTexture(m_sampler, m_viewportImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	m_viewportTextureSet = ImGui_ImplVulkan_AddTexture(m_sampler, m_bloomLdrImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+
 }
 
 void ErisEngine::cleanViewportResources()
@@ -3745,6 +3850,15 @@ void ErisEngine::cleanViewportResources()
 		vmaDestroyImage(m_allocator, m_viewportImage.image, m_viewportImage.allocation);
 		m_viewportImage.image = VK_NULL_HANDLE;
 	}
+	if (m_bloomLdrImage.imageView != VK_NULL_HANDLE) {
+		vkDestroyImageView(m_device, m_bloomLdrImage.imageView, nullptr);
+		m_bloomLdrImage.imageView = VK_NULL_HANDLE;
+	}
+	if (m_bloomLdrImage.image != VK_NULL_HANDLE) {
+		vmaDestroyImage(m_allocator, m_bloomLdrImage.image, m_bloomLdrImage.allocation);
+		m_bloomLdrImage.image = VK_NULL_HANDLE;
+	}
+
 }
 
 
@@ -4540,7 +4654,7 @@ void ErisEngine::drawLumenLighting(VkCommandBuffer cmd)
 	FrameData& frame = getCurrentFrame();
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipeline);
 
-	// Set 0: Scene, Set 1: GBuffer, Set 2: HDR image
+	// Set 0: Scene, Set 1: GBuffer 
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 0, 1, &frame.sceneDescriptorSet, 0, nullptr);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_lumenLightingPipelineLayout, 1, 1, &m_lumenDescriptorSet, 0, nullptr);
 
